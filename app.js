@@ -3,6 +3,7 @@
 
   const $ = (selector) => document.querySelector(selector);
   const engine = window.ABGEngine;
+  const parser = window.ABGParser;
   let latestReport = null;
   let completionLabel = "";
 
@@ -360,7 +361,84 @@
     $("#reportTimestamp").textContent = "Waiting for input";
     $("#report").className = "report-empty";
     $("#report").innerHTML = "<h3>Ready for analysis</h3><p>Enter pH, PaCO2, HCO3, and electrolytes to see the interpretation.</p>";
+    clearOcrState();
     updateCompletion();
+  }
+
+  function clearOcrState() {
+    $("#parsedSummary").innerHTML = "";
+    $("#ocrDetails").hidden = true;
+    $("#ocrText").textContent = "";
+    document.querySelectorAll(".field.unconfirmed").forEach((el) => el.classList.remove("unconfirmed"));
+  }
+
+  function fieldLabel(id) {
+    if (id === "sampleType") return "Sample type";
+    const match = groups.flatMap((group) => group.fields).find((field) => field.id === id);
+    return match ? match.label : id;
+  }
+
+  function applyOcrResult(result) {
+    const summary = $("#parsedSummary");
+    const ocrDetails = $("#ocrDetails");
+    const ocrText = $("#ocrText");
+
+    ocrText.textContent = result.rawText;
+    ocrDetails.hidden = !result.rawText.trim();
+    summary.innerHTML = "";
+
+    if (result.matchedCount === 0) {
+      const message = document.createElement("p");
+      message.className = "muted-line";
+      message.textContent = "Couldn't recognize any fields — check the pasted text includes the Blood Gas / Electrolyte / Metabolite values section, or enter values manually below.";
+      summary.append(message);
+      return;
+    }
+
+    const summaryLine = document.createElement("p");
+    summaryLine.textContent = `${result.matchedCount} of ${result.totalPrintable} fields recognized.`;
+
+    const chipRow = document.createElement("div");
+    chipRow.className = "parsed-chip-row";
+
+    Object.entries(result.fields).forEach(([id, match]) => {
+      if (id === "sampleType") {
+        const select = $("#sampleType");
+        if (select) select.value = match.value;
+      } else {
+        const input = $(`#${id}`);
+        const unitSelect = $(`#${id}Unit`);
+        if (input) input.value = match.value;
+        if (unitSelect) unitSelect.value = match.unit;
+      }
+
+      const fieldWrapper = document.querySelector(`.field[data-field="${id}"]`);
+      if (fieldWrapper) fieldWrapper.classList.toggle("unconfirmed", match.confidence === "ambiguous");
+
+      const chip = document.createElement("div");
+      chip.className = match.confidence === "ambiguous" ? "parsed-row ambiguous" : "parsed-row";
+      const label = document.createElement("span");
+      label.textContent = fieldLabel(id);
+      const value = document.createElement("strong");
+      value.textContent = match.value;
+      chip.append(label, value);
+      if (match.confidence === "ambiguous") {
+        const tag = document.createElement("span");
+        tag.className = "confidence-tag";
+        tag.textContent = "unconfirmed";
+        chip.append(tag);
+      }
+      chipRow.append(chip);
+    });
+
+    summary.append(summaryLine, chipRow);
+    updateCompletion();
+  }
+
+  function parsePastedText() {
+    if (!parser) return;
+    const result = parser.parse($("#pasteInput").value);
+    applyOcrResult(result);
   }
 
   function escapeHTML(value) {
@@ -740,6 +818,11 @@
         event.preventDefault();
         analyze();
       }
+    });
+    $("#parseOcrText").addEventListener("click", parsePastedText);
+    $("#abgForm").addEventListener("focusin", (event) => {
+      const fieldWrapper = event.target.closest && event.target.closest(".field.unconfirmed");
+      if (fieldWrapper) fieldWrapper.classList.remove("unconfirmed");
     });
   }
 

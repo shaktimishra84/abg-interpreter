@@ -42,10 +42,25 @@
           <div class="panel-head">
             <div>
               <h2>Capture and Values</h2>
-              <p>Start with the image, then confirm the main ABG numbers.</p>
+              <p>Enter values manually, or paste a report printout to auto-fill.</p>
             </div>
             <span class="status-pill" id="completionStatus">0 core</span>
           </div>
+
+          <details class="paste-details" id="pasteDetails">
+            <summary>Paste report text to auto-fill</summary>
+            <div class="paste-body">
+              <textarea id="pasteInput" class="paste-box" placeholder="Paste the OCR'd/copied report text here (e.g. from your phone's Live Text or ML Kit after photographing the printout)."></textarea>
+              <div class="paste-actions">
+                <button class="primary-button" id="parseOcrText" type="button">Parse</button>
+              </div>
+              <div class="parsed-summary" id="parsedSummary" aria-live="polite"></div>
+              <details class="ocr-details" id="ocrDetails" hidden>
+                <summary>Raw pasted text</summary>
+                <textarea id="ocrText" readonly></textarea>
+              </details>
+            </div>
+          </details>
 
           <form id="abgForm" autocomplete="off">
             <div class="tab-strip input-tabs" id="inputTabs" role="tablist" aria-label="Input groups">
@@ -88,6 +103,7 @@
     </template>
 
     <script src="engine.js"></script>
+    <script src="ocr-parser.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

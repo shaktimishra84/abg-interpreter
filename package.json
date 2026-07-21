@@ -4,6 +4,6 @@
   "private": true,
   "description": "Static rule-based ABG clinical interpreter.",
   "scripts": {
-    "test": "node smoke-test.js"
+    "test": "node smoke-test.js && node ocr-parser.test.js"
   }
 }

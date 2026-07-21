@@ -477,6 +477,97 @@ summary:focus-visible,
   box-shadow: 0 0 0 2px rgba(20, 127, 138, 0.12);
 }
 
+.paste-details {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0 14px;
+}
+
+.paste-details summary {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.8rem;
+  font-weight: 900;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.paste-details summary::after {
+  color: var(--primary);
+  content: "▼";
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.paste-details[open] summary {
+  border-color: var(--line);
+  border-radius: 7px 7px 0 0;
+}
+
+.paste-details[open] summary::after {
+  content: "▲";
+}
+
+.paste-body {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0 0 var(--radius) var(--radius);
+  border-top: 0;
+  padding: 10px;
+}
+
+.paste-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  display: block;
+  line-height: 1.35;
+  min-height: 92px;
+  outline: none;
+  padding: 9px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.paste-box:focus {
+  border-color: var(--primary);
+  box-shadow: var(--focus);
+}
+
+.paste-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.parsed-row.ambiguous {
+  border-left: 3px solid var(--warning);
+}
+
+.parsed-row .confidence-tag {
+  color: var(--warning);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.field.unconfirmed .field-control {
+  border-left: 3px solid var(--warning);
+  padding-left: 4px;
+}
+
+.field.unconfirmed .field-label::after {
+  color: var(--warning);
+  content: " (unconfirmed)";
+  font-size: 0.7rem;
+  text-transform: none;
+}
+
 .parsed-summary {
   display: grid;
   gap: 6px;
