@@ -27,6 +27,7 @@ const appFiles = [
   "styles.css",
   "app.js",
   "engine.js",
+  "ocr-parser.js",
   "smoke-test.js"
 ];
 
