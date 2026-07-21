@@ -391,7 +391,7 @@
     if (result.matchedCount === 0) {
       const message = document.createElement("p");
       message.className = "muted-line";
-      message.textContent = "Couldn't recognize any fields — check the pasted text includes the Blood Gas / Electrolyte / Metabolite values section, or enter values manually below.";
+      message.textContent = "Couldn't recognize any fields. If you scanned a photo, try retaking it with better lighting/less glare, or use your phone's own OCR (Live Text / ML Kit) and paste the text above instead — it's usually more accurate than in-app scanning. Otherwise enter values manually below.";
       summary.append(message);
       return;
     }
@@ -485,10 +485,45 @@
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
-          data[i] = data[i + 1] = data[i + 2] = contrasted;
+        const pixelCount = data.length / 4;
+        const gray = new Uint8ClampedArray(pixelCount);
+        const histogram = new Uint32Array(256);
+        for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+          const value = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          gray[p] = value;
+          histogram[gray[p]] += 1;
+        }
+
+        // Auto-levels: stretch the actual brightness range in THIS photo to
+        // 0-255, instead of assuming a fixed midpoint. A flat contrast
+        // formula (`(gray-128)*k+128`) does nothing useful on a
+        // washed-out/glare photo whose text and background are both
+        // already close to white — found by testing against a synthetic
+        // low-contrast photo that a fixed formula left Tesseract unable to
+        // read at all. Cutoffs are tight (0.1%) rather than a more typical
+        // 1-2%, because text-on-paper has sparse ink coverage — often
+        // under 1% of pixels — so a looser cutoff excludes the very ink
+        // pixels the stretch needs to preserve.
+        const lowCut = pixelCount * 0.001;
+        const highCut = pixelCount * 0.999;
+        let cumulative = 0;
+        let low = 0;
+        let high = 255;
+        for (let level = 0; level < 256; level += 1) {
+          cumulative += histogram[level];
+          if (cumulative >= lowCut) { low = level; break; }
+        }
+        cumulative = 0;
+        for (let level = 255; level >= 0; level -= 1) {
+          cumulative += histogram[level];
+          if (cumulative >= pixelCount - highCut) { high = level; break; }
+        }
+        const range = Math.max(1, high - low);
+
+        for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+          const stretched = ((gray[p] - low) / range) * 255;
+          const value = Math.max(0, Math.min(255, stretched));
+          data[i] = data[i + 1] = data[i + 2] = value;
         }
         ctx.putImageData(imageData, 0, 0);
         resolve(canvas);

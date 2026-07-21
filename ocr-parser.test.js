@@ -179,6 +179,12 @@ assert.strictEqual(field(rImplausibleValue, "potassium").value, "52", "still sur
 assert.strictEqual(field(rImplausibleValue, "potassium").confidence, "ambiguous", "an implausible value must be flagged even when it's the only candidate found");
 assert.strictEqual(field(rImplausibleValue, "sodium").confidence, "unambiguous", "a plausible value is not flagged just because another field on the same paste was");
 
+// --- Regression: found via realistic synthetic-photo testing. "cLac" got
+// OCR'd as "clLac" (a stray inserted letter near the label's leading "c"),
+// which silently dropped lactate entirely instead of just misreading it. ---
+const rStrayLetter = ABGParser.parse("clLac 0.9 mmol/L [ 0.0 - 2.0 ]");
+assert.strictEqual(field(rStrayLetter, "lactate").value, "0.9", "tolerates clLac for cLac, a real Tesseract misread");
+
 // --- Adversarial: oversized paste is capped, not a crash/hang ---
 const rOversized = ABGParser.parse("x".repeat(50000) + "\npH 7.4 [7.350-7.450]");
 assert.strictEqual(rOversized.rawText.length, 20000, "input is capped at MAX_INPUT_LENGTH");

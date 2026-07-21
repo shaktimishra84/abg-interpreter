@@ -23,7 +23,7 @@
     { id: "potassium", label: /\bcK\+?/i, unit: "mmol/L" },
     { id: "chloride", label: /\bcCl-?/i, unit: "mmol/L" },
     { id: "glucose", label: /\bcGlu/i, unit: "mg/dL" },
-    { id: "lactate", label: /\bcLac/i, unit: "mmol/L" },
+    { id: "lactate", label: /\bcl?Lac/i, unit: "mmol/L" },
     { id: "calcium", label: /\bcCa2\+?/i, unit: "mmol/L" },
     { id: "measuredOsmolality", label: /\bmOsm/i, unit: "mOsm/kg" }
   ];
