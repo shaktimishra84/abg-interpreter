@@ -171,13 +171,15 @@ assert.strictEqual(field(rHeaderLineBleed, "fio2").confidence, "unambiguous", "m
 
 // --- Regression: found via real bedside phone-photo testing. A printed
 // "5.3" (potassium) got OCR'd as "52" — a single, unambiguous-looking
-// number, so it was silently accepted with no confidence flag even
-// though 52 mmol/L is not a survivable potassium. A single out-of-range
-// candidate must now be flagged, not just multiple candidates. ---
+// number that was silently accepted with no confidence flag, even though
+// 52 mmol/L is not a survivable potassium. Per user feedback, an
+// implausible value must not be shown at all (not even flagged) — the
+// field is left blank, same as if nothing had been found, so a wrong
+// number can never be glanced over under time pressure. ---
 const rImplausibleValue = ABGParser.parse("cK+ 52 mmol/L [ 3.5 - 5.0 ]\ncNa+ 132 mmol/L [ 135 - 150 ]");
-assert.strictEqual(field(rImplausibleValue, "potassium").value, "52", "still surfaces the OCR'd value for the user to see");
-assert.strictEqual(field(rImplausibleValue, "potassium").confidence, "ambiguous", "an implausible value must be flagged even when it's the only candidate found");
-assert.strictEqual(field(rImplausibleValue, "sodium").confidence, "unambiguous", "a plausible value is not flagged just because another field on the same paste was");
+assert.strictEqual(field(rImplausibleValue, "potassium"), undefined, "an implausible value is left blank, not shown even with a flag");
+assert.strictEqual(field(rImplausibleValue, "sodium").confidence, "unambiguous", "a plausible value is not affected just because another field on the same paste was implausible");
+assert.strictEqual(rImplausibleValue.matchedCount, 1, "a rejected implausible value does not count toward the recognized total");
 
 // --- Regression: found via realistic synthetic-photo testing. "cLac" got
 // OCR'd as "clLac" (a stray inserted letter near the label's leading "c"),

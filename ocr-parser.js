@@ -132,11 +132,17 @@
       const window = readWindow(text, match.index + match[0].length, labelStarts, match.index);
       const numbers = window.match(NUMBER_RE);
       if (!numbers || !numbers.length) return;
-      const outOfRange = isOutOfRange(def.id, numbers[0]);
+      // An implausible value (e.g. potassium "532") is a confident OCR
+      // misread, not a judgment call for the user to weigh - showing it at
+      // all, even flagged, risks the flag being missed under time
+      // pressure. Treat it the same as not having found anything: leave
+      // the field blank rather than fill in a number with no plausible
+      // clinical reading.
+      if (isOutOfRange(def.id, numbers[0])) return;
       fields[def.id] = {
         value: numbers[0],
         unit: def.unit,
-        confidence: numbers.length > 1 || outOfRange ? "ambiguous" : "unambiguous"
+        confidence: numbers.length > 1 ? "ambiguous" : "unambiguous"
       };
       matchedCount += 1;
     });
