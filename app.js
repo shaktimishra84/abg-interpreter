@@ -451,7 +451,12 @@
   // persisted (see PLAN-ocr-autofill.md, CEO decision #2).
   const TESSERACT_SRC = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
   const TESSERACT_INTEGRITY = "sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F";
-  const MAX_IMAGE_DIMENSION = 1600;
+  // Real phone photos are typically 3000-4000px on the long edge; capping
+  // at 1600px was destroying exactly the fine detail (thermal-printer
+  // decimal points, tight superscripts) that recognition depends on -
+  // found after repeated real-photo testing kept losing decimal points
+  // (5.3 -> 52, 0.8 -> 08) even in fields with no other OCR noise.
+  const MAX_IMAGE_DIMENSION = 2600;
   let tesseractLoadPromise = null;
   let currentPhotoUrl = null;
 
@@ -577,6 +582,11 @@
           }
         }
       });
+      // Default page segmentation assumes a general-purpose page layout;
+      // "assume a single uniform block of text" (PSM 6) reads a printed
+      // lab report's stacked label/value rows more reliably than the
+      // default, which was found mis-segmenting rows on real test photos.
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
       setOcrProgress("Scanning...");
       const { data } = await worker.recognize(canvas);
       applyOcrResult(parser.parse(data.text));
