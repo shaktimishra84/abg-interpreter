@@ -34,6 +34,35 @@
   const NUMBER_RE = /-?\d+\.?\d*/g;
   const HAS_NUMBER_RE = /-?\d+\.?\d*/;
 
+  // Generously wide plausibility bounds (mirrors app.js's fieldHints, kept
+  // in sync manually) — not clinical alarm limits, just a safety net against
+  // OCR misreads that silently produce an implausible-but-plausible-looking
+  // number (e.g. a printed "5.3" misread as "52" when a thermal-printer
+  // decimal point is too faint to recognize). A match outside these bounds
+  // is flagged "ambiguous" (shown as unconfirmed) rather than trusted.
+  const RANGE_HINTS = {
+    pH: [6.7, 7.8],
+    paCO2: [5, 150],
+    paO2: [20, 600],
+    fio2: [15, 100],
+    hco3: [2, 60],
+    sbe: [-40, 40],
+    sodium: [100, 180],
+    potassium: [1, 10],
+    chloride: [60, 140],
+    glucose: [0, 600],
+    lactate: [0, 30],
+    calcium: [0.2, 3],
+    measuredOsmolality: [200, 400]
+  };
+
+  function isOutOfRange(fieldId, value) {
+    const range = RANGE_HINTS[fieldId];
+    if (!range) return false;
+    const numeric = parseFloat(value);
+    return Number.isFinite(numeric) && (numeric < range[0] || numeric > range[1]);
+  }
+
   // Fields present on every Radiometer ABL800 FLEX printout examined —
   // the denominator for "N of M fields recognized". Fields outside this
   // set (albumin, urea, urine indices, etc.) are never printed on this
@@ -103,10 +132,11 @@
       const window = readWindow(text, match.index + match[0].length, labelStarts, match.index);
       const numbers = window.match(NUMBER_RE);
       if (!numbers || !numbers.length) return;
+      const outOfRange = isOutOfRange(def.id, numbers[0]);
       fields[def.id] = {
         value: numbers[0],
         unit: def.unit,
-        confidence: numbers.length > 1 ? "ambiguous" : "unambiguous"
+        confidence: numbers.length > 1 || outOfRange ? "ambiguous" : "unambiguous"
       };
       matchedCount += 1;
     });

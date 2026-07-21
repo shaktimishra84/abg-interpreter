@@ -169,6 +169,16 @@ pH 7.303 [ 7.350 - 7.450 ]
 assert.strictEqual(field(rHeaderLineBleed, "fio2").value, "21.0");
 assert.strictEqual(field(rHeaderLineBleed, "fio2").confidence, "unambiguous", "must not be flagged ambiguous just because the next header line (temperature) has a number too");
 
+// --- Regression: found via real bedside phone-photo testing. A printed
+// "5.3" (potassium) got OCR'd as "52" — a single, unambiguous-looking
+// number, so it was silently accepted with no confidence flag even
+// though 52 mmol/L is not a survivable potassium. A single out-of-range
+// candidate must now be flagged, not just multiple candidates. ---
+const rImplausibleValue = ABGParser.parse("cK+ 52 mmol/L [ 3.5 - 5.0 ]\ncNa+ 132 mmol/L [ 135 - 150 ]");
+assert.strictEqual(field(rImplausibleValue, "potassium").value, "52", "still surfaces the OCR'd value for the user to see");
+assert.strictEqual(field(rImplausibleValue, "potassium").confidence, "ambiguous", "an implausible value must be flagged even when it's the only candidate found");
+assert.strictEqual(field(rImplausibleValue, "sodium").confidence, "unambiguous", "a plausible value is not flagged just because another field on the same paste was");
+
 // --- Adversarial: oversized paste is capped, not a crash/hang ---
 const rOversized = ABGParser.parse("x".repeat(50000) + "\npH 7.4 [7.350-7.450]");
 assert.strictEqual(rOversized.rawText.length, 20000, "input is capped at MAX_INPUT_LENGTH");
