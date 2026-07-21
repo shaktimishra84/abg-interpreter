@@ -48,15 +48,31 @@
           </div>
 
           <details class="paste-details" id="pasteDetails">
-            <summary>Paste report text to auto-fill</summary>
+            <summary>Auto-fill from a photo</summary>
             <div class="paste-body">
-              <textarea id="pasteInput" class="paste-box" placeholder="Paste the OCR'd/copied report text here (e.g. from your phone's Live Text or ML Kit after photographing the printout)."></textarea>
+              <div class="photo-section">
+                <div class="photo-grid">
+                  <label class="photo-drop" id="photoDrop">
+                    <input type="file" accept="image/*" capture="environment" id="photoInput">
+                    <span>Take or choose a photo</span>
+                    <small>Scanned in your browser. The photo is never uploaded anywhere.</small>
+                  </label>
+                  <div class="photo-preview" id="photoPreview">No photo yet</div>
+                </div>
+                <div class="photo-actions" id="photoActions" hidden>
+                  <button class="ghost-button" id="removePhoto" type="button">Remove photo</button>
+                  <span class="muted-line" id="ocrProgress"></span>
+                </div>
+              </div>
+
+              <p class="muted-line paste-divider">or paste text already recognized by your phone's own OCR (e.g. Live Text / ML Kit)</p>
+              <textarea id="pasteInput" class="paste-box" placeholder="Paste the OCR'd/copied report text here."></textarea>
               <div class="paste-actions">
                 <button class="primary-button" id="parseOcrText" type="button">Parse</button>
               </div>
               <div class="parsed-summary" id="parsedSummary" aria-live="polite"></div>
               <details class="ocr-details" id="ocrDetails" hidden>
-                <summary>Raw pasted text</summary>
+                <summary>Raw recognized text</summary>
                 <textarea id="ocrText" readonly></textarea>
               </details>
             </div>

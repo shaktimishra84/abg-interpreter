@@ -294,3 +294,18 @@ Architecture confirmed sound (own module, existing engine.js pattern reused, no 
 
 **STATUS: DONE — implemented, tested, committed** (`88ba39a`). `ocr-parser.js` + `ocr-parser.test.js` added; `app.js`/`index.html`/`styles.css` wired up. Verified end-to-end in-browser: paste → parse → autofill → Analyze all work; zero-match and ambiguous-confidence states verified. One real bug found and fixed during manual browser testing (not caught by the fixture tests at the time): FiO2 in the header block was picking up the following "T 37.0 °C" temperature line as a false second candidate and getting incorrectly flagged ambiguous — fixed by checking the label's own line first, only falling back to the next line if nothing matched there. Regression test added for this case.
 
+---
+
+## Addendum: In-app camera capture (approach B), added after live testing
+
+After trying the live paste-text flow, the user decided the extra app-switch (camera app → Live Text → copy → back → paste) was worth removing — greenlighting the "approach B" item that was deferred to TODOS in the Phase 1 CEO review. Implemented on top of the same `ocr-parser.js` (P4 DRY — zero new parsing logic):
+
+- **Tesseract.js 5.1.1** loaded lazily from a pinned, SRI-hashed jsdelivr URL, only when a photo is actually selected (never on page load). The photo itself never leaves the device — only the generic OCR engine/language files (identical for every user) are fetched over the network, same privacy posture as the CEO phase's hard constraint (no PHI ever transits the network).
+- Photo is downscaled (max 1600px) and converted to grayscale + contrast-stretched via canvas before recognition, per the original rough plan's preprocessing note — cheap, helps with the glare/skew visible in the user's real sample photos.
+- Photo/canvas/object-URL is discarded immediately after recognition (`URL.revokeObjectURL`, worker terminated) — nothing persisted, satisfying CEO decision #2.
+- Recognized text feeds the exact same `parser.parse()` → `applyOcrResult()` pipeline already built for paste-text — same confidence flagging, same "N of M recognized" summary, same never-auto-runs-analysis behavior.
+- UI reuses the dead `.photo-drop`/`.photo-preview`/`.photo-grid`/`.photo-actions` CSS from the original May commits (finally wired up, ~14 months after it was first styled) inside the same "Auto-fill from a photo" disclosure, above the existing paste-text box (now offered as a fallback "or paste text directly" option, not removed).
+- **Verified against a real OCR run** (not hand-written test text): generated a synthetic report image and ran it through the actual in-browser Tesseract pipeline. Found two more real misreads this way — `FO2(l)` → `F02(1)` (zero for letter O) and `cHCO3` → `cHCO03` (spurious inserted zero) — both fixed in `ocr-parser.js` and covered by new regression fixtures built from the literal OCR output, not authored by hand.
+
+TODOS.md item "in-app camera capture" — done, no longer deferred.
+

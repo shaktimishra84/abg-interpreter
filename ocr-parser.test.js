@@ -139,6 +139,21 @@ assert.strictEqual(field(rAmbiguous, "potassium").confidence, "ambiguous");
 assert.strictEqual(field(rAmbiguous, "potassium").value, "3.5", "takes the first candidate but flags it for review");
 assert.strictEqual(field(rAmbiguous, "sodium").confidence, "unambiguous");
 
+// --- Regression: real Tesseract.js output on a synthetic test report
+// (not hand-written OCR noise) mangled "FO2(l)" into "F02(1)" (zero for
+// the letter O) and "cHCO3" into "cHCO03" (spurious inserted zero).
+// Found via an actual in-browser OCR run, not authored by hand. ---
+const rRealOcrNoise = ABGParser.parse(`
+Sample type Arterial
+F02(1) 21.0 %
+Blood Gas Values
+pH 7.303 [ 7.350 - 7.450 ]
+Acid Base Status
+cHCO03-(P,st)c 18.3 mmol/L
+`);
+assert.strictEqual(field(rRealOcrNoise, "fio2").value, "21.0", "tolerates F02(1) for FO2(l), a real Tesseract misread");
+assert.strictEqual(field(rRealOcrNoise, "hco3").value, "18.3", "tolerates cHCO03 for cHCO3, a real Tesseract misread");
+
 // --- Regression: FiO2 in the header must not pick up the next line's
 // value (e.g. "T 37.0 C" temperature) as a false second candidate just
 // because "T" isn't a tracked label boundary. ---

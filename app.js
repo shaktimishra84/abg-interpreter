@@ -370,6 +370,7 @@
     $("#ocrDetails").hidden = true;
     $("#ocrText").textContent = "";
     document.querySelectorAll(".field.unconfirmed").forEach((el) => el.classList.remove("unconfirmed"));
+    clearPhoto();
   }
 
   function fieldLabel(id) {
@@ -439,6 +440,150 @@
     if (!parser) return;
     const result = parser.parse($("#pasteInput").value);
     applyOcrResult(result);
+  }
+
+  // In-app photo capture + OCR. Tesseract.js is loaded lazily from a
+  // pinned, integrity-checked CDN URL only when a photo is actually used —
+  // it never sees the photo itself (the photo is processed entirely in
+  // this browser tab; only the generic OCR engine/language files, the
+  // same for every user, are fetched over the network). The photo and its
+  // canvas are discarded immediately after recognition — nothing is
+  // persisted (see PLAN-ocr-autofill.md, CEO decision #2).
+  const TESSERACT_SRC = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+  const TESSERACT_INTEGRITY = "sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F";
+  const MAX_IMAGE_DIMENSION = 1600;
+  let tesseractLoadPromise = null;
+  let currentPhotoUrl = null;
+
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (tesseractLoadPromise) return tesseractLoadPromise;
+    tesseractLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = TESSERACT_SRC;
+      script.integrity = TESSERACT_INTEGRITY;
+      script.crossOrigin = "anonymous";
+      script.onload = () => resolve(window.Tesseract);
+      script.onerror = () => reject(new Error("Couldn't load the OCR engine. Check your connection and try again, or use the paste box below instead."));
+      document.head.append(script);
+    });
+    return tesseractLoadPromise;
+  }
+
+  function preprocessImage(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
+          data[i] = data[i + 1] = data[i + 2] = contrasted;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Couldn't read that photo."));
+      };
+      img.src = url;
+    });
+  }
+
+  function setOcrProgress(text) {
+    $("#ocrProgress").textContent = text;
+  }
+
+  function showPhotoPreview(file) {
+    if (currentPhotoUrl) URL.revokeObjectURL(currentPhotoUrl);
+    currentPhotoUrl = URL.createObjectURL(file);
+    const preview = $("#photoPreview");
+    preview.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = currentPhotoUrl;
+    img.alt = "Selected report photo";
+    preview.append(img);
+    $("#photoActions").hidden = false;
+  }
+
+  function clearPhoto() {
+    if (currentPhotoUrl) {
+      URL.revokeObjectURL(currentPhotoUrl);
+      currentPhotoUrl = null;
+    }
+    $("#photoPreview").innerHTML = "No photo yet";
+    $("#photoActions").hidden = true;
+    $("#photoInput").value = "";
+    setOcrProgress("");
+  }
+
+  async function runOcrOnFile(file) {
+    showPhotoPreview(file);
+    setOcrProgress("Loading OCR engine...");
+    let worker = null;
+    try {
+      const Tesseract = await loadTesseract();
+      const canvas = await preprocessImage(file);
+      worker = await Tesseract.createWorker("eng", 1, {
+        logger: (message) => {
+          if (message.status === "recognizing text") {
+            setOcrProgress(`Scanning... ${Math.round((message.progress || 0) * 100)}%`);
+          }
+        }
+      });
+      setOcrProgress("Scanning...");
+      const { data } = await worker.recognize(canvas);
+      applyOcrResult(parser.parse(data.text));
+      setOcrProgress("Done — photo discarded, only the recognized text above is kept.");
+    } catch (error) {
+      setOcrProgress(error.message || "Couldn't scan that photo. Try the paste box below instead.");
+    } finally {
+      if (worker) await worker.terminate();
+      // The photo/canvas is never sent anywhere and is not kept after
+      // recognition — only its recognized text (already applied above).
+      if (currentPhotoUrl) {
+        URL.revokeObjectURL(currentPhotoUrl);
+        currentPhotoUrl = null;
+      }
+    }
+  }
+
+  function bindPhotoEvents() {
+    const drop = $("#photoDrop");
+    const input = $("#photoInput");
+
+    input.addEventListener("change", () => {
+      if (input.files && input.files[0]) runOcrOnFile(input.files[0]);
+    });
+    $("#removePhoto").addEventListener("click", clearPhoto);
+
+    ["dragover", "dragenter"].forEach((eventName) => {
+      drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        drop.classList.add("dragging");
+      });
+    });
+    ["dragleave", "drop"].forEach((eventName) => {
+      drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        drop.classList.remove("dragging");
+      });
+    });
+    drop.addEventListener("drop", (event) => {
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file && file.type.startsWith("image/")) runOcrOnFile(file);
+    });
   }
 
   function escapeHTML(value) {
@@ -828,6 +973,7 @@
 
   renderInputs();
   bindEvents();
+  bindPhotoEvents();
   bindInputTabs();
   updateCompletion();
 })();
