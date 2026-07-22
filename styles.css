@@ -364,6 +364,10 @@ summary:focus-visible,
   margin-top: 9px;
 }
 
+.photo-actions[hidden] {
+  display: none;
+}
+
 .ocr-details {
   margin-top: 9px;
 }
@@ -548,46 +552,6 @@ summary:focus-visible,
   display: flex;
   gap: 8px;
   margin-top: 8px;
-}
-
-.paste-divider {
-  margin: 12px 0 8px;
-  text-align: center;
-}
-
-.photo-details {
-  margin-top: 14px;
-}
-
-.photo-details summary {
-  align-items: center;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--muted);
-  cursor: pointer;
-  display: flex;
-  font-size: 0.8rem;
-  font-weight: 900;
-  justify-content: space-between;
-  min-height: 36px;
-  padding: 7px 10px;
-}
-
-.photo-details summary::after {
-  color: var(--primary);
-  content: "▼";
-  font-size: 0.78rem;
-  line-height: 1;
-}
-
-.photo-details[open] summary::after {
-  content: "▲";
-}
-
-.photo-details .photo-section {
-  border-bottom: 0;
-  padding-top: 10px;
 }
 
 .photo-actions .muted-line {
