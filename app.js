@@ -628,7 +628,9 @@
       // fio2 is stored internally as a fraction (0-1); 60% = 0.6.
       test: (v) => v > 0.6,
       describe: (v) => `${round(v * 100, 0)}% (critical: >60%)`
-    }
+    },
+    { field: "potassium", label: "Potassium", test: (v) => v > 6, describe: (v) => `${v} mmol/L (critical: >6)` },
+    { field: "paO2", label: "PaO2", test: (v) => v < 60, describe: (v) => `${v} mmHg (critical: <60)` }
   ];
 
   function round(value, digits) {
