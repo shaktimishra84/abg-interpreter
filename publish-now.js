@@ -28,7 +28,8 @@ const appFiles = [
   "app.js",
   "engine.js",
   "ocr-parser.js",
-  "smoke-test.js"
+  "smoke-test.js",
+  "api/scan.js"
 ];
 
 const appDirs = ["images"];
@@ -145,7 +146,9 @@ function setProfessionalAlias(deploymentHost, env, cwd) {
 function deployToVercel() {
   const deployDir = fs.mkdtempSync(path.join("/private/tmp", "abg-deploy-"));
   for (const file of appFiles.filter((item) => item !== "smoke-test.js")) {
-    fs.copyFileSync(path.join(root, file), path.join(deployDir, file));
+    const dest = path.join(deployDir, file);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(root, file), dest);
   }
   for (const dir of appDirs) {
     const src = path.join(root, dir);

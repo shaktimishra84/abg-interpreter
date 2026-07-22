@@ -442,96 +442,29 @@
     applyOcrResult(result);
   }
 
-  // In-app photo capture + OCR. Tesseract.js is loaded lazily from a
-  // pinned, integrity-checked CDN URL only when a photo is actually used —
-  // it never sees the photo itself (the photo is processed entirely in
-  // this browser tab; only the generic OCR engine/language files, the
-  // same for every user, are fetched over the network). The photo and its
-  // canvas are discarded immediately after recognition — nothing is
-  // persisted (see PLAN-ocr-autofill.md, CEO decision #2).
-  const TESSERACT_SRC = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-  const TESSERACT_INTEGRITY = "sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F";
-  // Real phone photos are typically 3000-4000px on the long edge; capping
-  // at 1600px was destroying exactly the fine detail (thermal-printer
-  // decimal points, tight superscripts) that recognition depends on -
-  // found after repeated real-photo testing kept losing decimal points
-  // (5.3 -> 52, 0.8 -> 08) even in fields with no other OCR noise.
-  const MAX_IMAGE_DIMENSION = 2600;
-  let tesseractLoadPromise = null;
+  // In-app photo capture, scanned via the Claude API (server-side, see
+  // api/scan.js). Unlike the earlier Tesseract.js version, the photo IS
+  // sent over the network here - explicitly chosen by the user over the
+  // in-browser-only alternative after being told what that costs (see
+  // PLAN-ocr-autofill.md). Claude's transcription is fed through the same
+  // ocr-parser.js used by the paste-text path, so the same plausibility
+  // and confidence safety net applies regardless of source.
+  const MAX_UPLOAD_DIMENSION = 1568; // Claude's own recommended long edge for image inputs
   let currentPhotoUrl = null;
 
-  function loadTesseract() {
-    if (window.Tesseract) return Promise.resolve(window.Tesseract);
-    if (tesseractLoadPromise) return tesseractLoadPromise;
-    tesseractLoadPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = TESSERACT_SRC;
-      script.integrity = TESSERACT_INTEGRITY;
-      script.crossOrigin = "anonymous";
-      script.onload = () => resolve(window.Tesseract);
-      script.onerror = () => reject(new Error("Couldn't load the OCR engine. Check your connection and try again, or use the paste box below instead."));
-      document.head.append(script);
-    });
-    return tesseractLoadPromise;
-  }
-
-  function preprocessImage(file) {
+  function encodeImageForUpload(file) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(img.width, img.height));
+        const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        const pixelCount = data.length / 4;
-        const gray = new Uint8ClampedArray(pixelCount);
-        const histogram = new Uint32Array(256);
-        for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-          const value = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          gray[p] = value;
-          histogram[gray[p]] += 1;
-        }
-
-        // Auto-levels: stretch the actual brightness range in THIS photo to
-        // 0-255, instead of assuming a fixed midpoint. A flat contrast
-        // formula (`(gray-128)*k+128`) does nothing useful on a
-        // washed-out/glare photo whose text and background are both
-        // already close to white — found by testing against a synthetic
-        // low-contrast photo that a fixed formula left Tesseract unable to
-        // read at all. Cutoffs are tight (0.1%) rather than a more typical
-        // 1-2%, because text-on-paper has sparse ink coverage — often
-        // under 1% of pixels — so a looser cutoff excludes the very ink
-        // pixels the stretch needs to preserve.
-        const lowCut = pixelCount * 0.001;
-        const highCut = pixelCount * 0.999;
-        let cumulative = 0;
-        let low = 0;
-        let high = 255;
-        for (let level = 0; level < 256; level += 1) {
-          cumulative += histogram[level];
-          if (cumulative >= lowCut) { low = level; break; }
-        }
-        cumulative = 0;
-        for (let level = 255; level >= 0; level -= 1) {
-          cumulative += histogram[level];
-          if (cumulative >= pixelCount - highCut) { high = level; break; }
-        }
-        const range = Math.max(1, high - low);
-
-        for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-          const stretched = ((gray[p] - low) / range) * 255;
-          const value = Math.max(0, Math.min(255, stretched));
-          data[i] = data[i + 1] = data[i + 2] = value;
-        }
-        ctx.putImageData(imageData, 0, 0);
-        resolve(canvas);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        resolve(dataUrl.slice(dataUrl.indexOf(",") + 1));
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -570,37 +503,23 @@
 
   async function runOcrOnFile(file) {
     showPhotoPreview(file);
-    setOcrProgress("Loading OCR engine...");
-    let worker = null;
+    setOcrProgress("Sending to Claude for scanning...");
     try {
-      const Tesseract = await loadTesseract();
-      const canvas = await preprocessImage(file);
-      worker = await Tesseract.createWorker("eng", 1, {
-        logger: (message) => {
-          if (message.status === "recognizing text") {
-            setOcrProgress(`Scanning... ${Math.round((message.progress || 0) * 100)}%`);
-          }
-        }
+      const image = await encodeImageForUpload(file);
+      const response = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image, mediaType: "image/jpeg" })
       });
-      // Default page segmentation assumes a general-purpose page layout;
-      // "assume a single uniform block of text" (PSM 6) reads a printed
-      // lab report's stacked label/value rows more reliably than the
-      // default, which was found mis-segmenting rows on real test photos.
-      await worker.setParameters({ tessedit_pageseg_mode: "6" });
-      setOcrProgress("Scanning...");
-      const { data } = await worker.recognize(canvas);
-      applyOcrResult(parser.parse(data.text));
-      setOcrProgress("Done — photo discarded, only the recognized text above is kept.");
-    } catch (error) {
-      setOcrProgress(error.message || "Couldn't scan that photo. Try the paste box below instead.");
-    } finally {
-      if (worker) await worker.terminate();
-      // The photo/canvas is never sent anywhere and is not kept after
-      // recognition — only its recognized text (already applied above).
-      if (currentPhotoUrl) {
-        URL.revokeObjectURL(currentPhotoUrl);
-        currentPhotoUrl = null;
+      const result = await response.json();
+      if (!response.ok) {
+        setOcrProgress(result.error || "Couldn't scan that photo. Try the paste box below instead.");
+        return;
       }
+      applyOcrResult(parser.parse(result.text));
+      setOcrProgress("Done.");
+    } catch (error) {
+      setOcrProgress("Couldn't reach the scanning service. Try again, or use the paste box below instead.");
     }
   }
 

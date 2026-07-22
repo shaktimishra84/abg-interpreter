@@ -50,7 +50,7 @@
           <details class="paste-details" id="pasteDetails">
             <summary>Auto-fill from a report</summary>
             <div class="paste-body">
-              <p class="muted-line">Photograph the report with your phone, use its own OCR (Live Text on iPhone, or long-press to copy text on Android/ML Kit) to recognize the text, then paste it here. This is consistently more accurate than scanning in-app.</p>
+              <p class="muted-line">Photograph the report with your phone, use its own OCR (Live Text on iPhone, or long-press to copy text on Android/ML Kit) to recognize the text, then paste it here. Nothing leaves your device with this option.</p>
               <textarea id="pasteInput" class="paste-box" placeholder="Paste the OCR'd/copied report text here."></textarea>
               <div class="paste-actions">
                 <button class="primary-button" id="parseOcrText" type="button">Parse</button>
@@ -62,13 +62,13 @@
               </details>
 
               <details class="photo-details">
-                <summary>Or scan a photo in-app (experimental, less accurate)</summary>
+                <summary>Or scan a photo directly (sent to Claude)</summary>
                 <div class="photo-section">
                   <div class="photo-grid">
                     <label class="photo-drop" id="photoDrop">
                       <input type="file" accept="image/*" capture="environment" id="photoInput">
                       <span>Take or choose a photo</span>
-                      <small>Scanned in your browser. The photo is never uploaded anywhere. Accuracy varies with photo quality — check every field it fills in.</small>
+                      <small>This photo — including any patient ID/name printed on it — is sent to Anthropic's Claude API to read it. Use the paste option above if you'd rather nothing leave this device.</small>
                     </label>
                     <div class="photo-preview" id="photoPreview">No photo yet</div>
                   </div>

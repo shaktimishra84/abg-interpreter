@@ -309,3 +309,21 @@ After trying the live paste-text flow, the user decided the extra app-switch (ca
 
 TODOS.md item "in-app camera capture" — done, no longer deferred.
 
+---
+
+## Addendum 2: Tesseract.js replaced with Claude API vision (privacy tradeoff explicitly re-opened)
+
+Real bedside-photo testing (multiple actual Radiometer printouts, not synthetic images) repeatedly showed Tesseract.js underperforming badly — recognition rates as low as 1/14–6/14, and a recurring failure mode where thermal-printer decimal points were misread or dropped entirely (`5.3` → `52` → `532` across successive tests). Several rounds of real fixes were made along the way (auto-levels contrast stretching, upload resolution, PSM tuning, label-pattern fixes) and each helped somewhat, but the ceiling remained low — consistent with the original CEO-phase finding that native/vision OCR engines are structurally better at this than Tesseract.js, now re-confirmed empirically rather than just theoretically.
+
+During diagnosis, Claude (asked directly, in-conversation, to read one of the same real photos) transcribed every field correctly. This directly demonstrated that a capable vision model reads this report type far better than Tesseract, and reopened the CEO phase's original hard constraint ("OCR must run 100% client-side, zero network calls on the image") as an explicit decision point rather than a settled one.
+
+**User was presented the tradeoff explicitly and chose to reopen it:** send the photo to the Claude API for transcription, accepting that the photo — including the real Patient ID/Last Name/Sex printed on it — now leaves the device and transits Anthropic's API. Offered a middle option (crop the identifying header out client-side before sending) — user explicitly declined and chose to send the whole photo as-is.
+
+Implementation:
+- New `api/scan.js` Vercel serverless function — the first backend this app has ever had. Holds `ANTHROPIC_API_KEY` as a server-side env var (never exposed to client JS). Calls the Claude API's vision endpoint with the photo, asking for a verbatim transcription (not structured extraction) of the printed text.
+- Client-side (`app.js`): photo is downscaled to Claude's own recommended ~1568px long edge and JPEG-encoded, POSTed to `/api/scan`, and the returned transcription is fed through the **same** `ocr-parser.js` → `applyOcrResult()` pipeline used by paste-text — same plausibility/confidence safety net, zero new parsing logic (P4 DRY held even through this architecture change).
+- Tesseract.js removed entirely (CDN script loading, canvas preprocessing, worker lifecycle, PSM tuning) — superseded, no reason to maintain two OCR engines once one is both more accurate and simpler.
+- UI copy corrected to honestly state the photo is sent to Anthropic's Claude API — the previous "never uploaded anywhere" claim would now be false and is a hard requirement to get right, not a nice-to-have.
+- `publish-now.js` updated: added `api/scan.js` to its deploy whitelist and fixed its flat-file copy loop (previously assumed only top-level files, would have silently failed to deploy anything under a subdirectory).
+- **Not yet done:** `ANTHROPIC_API_KEY` needs to be set as a Vercel production env var by the user (a credential-handling step Claude Code won't do on the user's behalf) before this path is live — until then, `/api/scan` returns a clear "not configured, use paste-text" error rather than failing silently.
+
