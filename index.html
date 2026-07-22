@@ -48,24 +48,9 @@
           </div>
 
           <details class="paste-details" id="pasteDetails">
-            <summary>Auto-fill from a photo</summary>
+            <summary>Auto-fill from a report</summary>
             <div class="paste-body">
-              <div class="photo-section">
-                <div class="photo-grid">
-                  <label class="photo-drop" id="photoDrop">
-                    <input type="file" accept="image/*" capture="environment" id="photoInput">
-                    <span>Take or choose a photo</span>
-                    <small>Scanned in your browser. The photo is never uploaded anywhere.</small>
-                  </label>
-                  <div class="photo-preview" id="photoPreview">No photo yet</div>
-                </div>
-                <div class="photo-actions" id="photoActions" hidden>
-                  <button class="ghost-button" id="removePhoto" type="button">Remove photo</button>
-                  <span class="muted-line" id="ocrProgress"></span>
-                </div>
-              </div>
-
-              <p class="muted-line paste-divider">or paste text already recognized by your phone's own OCR (e.g. Live Text / ML Kit)</p>
+              <p class="muted-line">Photograph the report with your phone, use its own OCR (Live Text on iPhone, or long-press to copy text on Android/ML Kit) to recognize the text, then paste it here. This is consistently more accurate than scanning in-app.</p>
               <textarea id="pasteInput" class="paste-box" placeholder="Paste the OCR'd/copied report text here."></textarea>
               <div class="paste-actions">
                 <button class="primary-button" id="parseOcrText" type="button">Parse</button>
@@ -74,6 +59,24 @@
               <details class="ocr-details" id="ocrDetails" hidden>
                 <summary>Raw recognized text</summary>
                 <textarea id="ocrText" readonly></textarea>
+              </details>
+
+              <details class="photo-details">
+                <summary>Or scan a photo in-app (experimental, less accurate)</summary>
+                <div class="photo-section">
+                  <div class="photo-grid">
+                    <label class="photo-drop" id="photoDrop">
+                      <input type="file" accept="image/*" capture="environment" id="photoInput">
+                      <span>Take or choose a photo</span>
+                      <small>Scanned in your browser. The photo is never uploaded anywhere. Accuracy varies with photo quality — check every field it fills in.</small>
+                    </label>
+                    <div class="photo-preview" id="photoPreview">No photo yet</div>
+                  </div>
+                  <div class="photo-actions" id="photoActions" hidden>
+                    <button class="ghost-button" id="removePhoto" type="button">Remove photo</button>
+                    <span class="muted-line" id="ocrProgress"></span>
+                  </div>
+                </div>
               </details>
             </div>
           </details>
