@@ -1,17 +1,23 @@
 // Serverless function: receives a base64 photo of an ABG report and asks
-// the Claude API to transcribe its printed text. The transcription is fed
+// the Gemini API to transcribe its printed text. The transcription is fed
 // through the existing client-side ocr-parser.js (same regex matching,
-// same plausibility/confidence checks as the paste-text and Tesseract
-// paths) - this endpoint's only job is producing better raw text, not
-// field extraction or clinical interpretation.
+// same plausibility/confidence checks as the paste-text path) - this
+// endpoint's only job is producing better raw text, not field extraction
+// or clinical interpretation.
 //
 // PRIVACY NOTE: the photo (including any patient ID/name/sex printed on
-// it) is sent to Anthropic's API here. The user explicitly chose this
+// it) is sent to Google's API here. The user explicitly chose this
 // tradeoff over the alternatives (paste-text, cropped-header vision call)
 // after being told what it costs - see PLAN-ocr-autofill.md.
+//
+// Model choice: gemini-3.6-flash, not the cheaper -flash-lite tier -
+// deliberate, not an oversight. Flash-Lite targets high-volume, low-
+// latency agentic workflows; this is a single careful read of a clinical
+// document, and the cost difference between tiers is a fraction of a
+// cent per scan at this app's volume - not worth trading transcription
+// accuracy for.
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-5";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // base64 payload guard, matches typical serverless body limits
 
 const TRANSCRIBE_PROMPT = `Transcribe the printed text from this lab report photo exactly as it appears. Preserve each row as its own line, in the order printed, including labels, numeric values, units, and reference ranges. Include the header fields (Sample type, FO2(l)). Do not interpret, calculate, summarize, or omit anything - verbatim transcription only, one printed row per line. Do not transcribe handwritten annotations.`;
@@ -22,7 +28,7 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: "Scanning isn't configured on this deployment yet (missing API key). Use the paste-text option instead." });
     return;
@@ -39,29 +45,23 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const response = await fetch(ANTHROPIC_API_URL, {
+    const response = await fetch(GEMINI_API_URL, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "x-goog-api-key": apiKey,
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1024,
-        messages: [
+        contents: [
           {
-            role: "user",
-            content: [
+            parts: [
+              { text: TRANSCRIBE_PROMPT },
               {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: mediaType || "image/jpeg",
+                inline_data: {
+                  mime_type: mediaType || "image/jpeg",
                   data: image
                 }
-              },
-              { type: "text", text: TRANSCRIBE_PROMPT }
+              }
             ]
           }
         ]
@@ -75,9 +75,8 @@ module.exports = async (req, res) => {
     }
 
     const data = await response.json();
-    const text = (data.content || [])
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
+    const text = ((data.candidates || [])[0]?.content?.parts || [])
+      .map((part) => part.text || "")
       .join("\n");
 
     res.status(200).json({ text });
