@@ -602,6 +602,52 @@
     return `<ol class="step-list">${items.map((item) => `<li class="${className || ""}">${escapeHTML(item)}</li>`).join("")}</ol>`;
   }
 
+  // Quick bedside triage flags, separate from engine.js's deeper
+  // danger_flags logic (which uses different thresholds for different
+  // purposes further down the report). These four are meant to be seen
+  // in the first second of opening the report, before reading anything
+  // else - only fires on a confirmed (unambiguous-unit) value, same
+  // caution the rest of the app already applies before trusting a number.
+  const CRITICAL_RULES = [
+    { field: "pH", label: "pH", test: (v) => v < 7.3, describe: (v) => `${v} (critical: <7.30)` },
+    { field: "paCO2", label: "PaCO2", test: (v) => v > 50, describe: (v) => `${v} mmHg (critical: >50)` },
+    { field: "lactate", label: "Lactate", test: (v) => v > 4, describe: (v) => `${v} mmol/L (critical: >4)` },
+    {
+      field: "glucose",
+      label: "Glucose",
+      // glucose is stored internally in mmol/L; 70 mg/dL is the
+      // conventional hypoglycemia threshold, converted here so the
+      // stored comparison matches how the rest of engine.js converts
+      // glucose (divide/multiply by 18).
+      test: (v) => v < 70 / 18,
+      describe: (v) => `${round(v * 18, 0)} mg/dL (critical: <70)`
+    }
+  ];
+
+  function round(value, digits) {
+    const factor = 10 ** digits;
+    return Math.round(value * factor) / factor;
+  }
+
+  function criticalFlags(report) {
+    const converted = report.unit_normalization.converted_inputs;
+    return CRITICAL_RULES.filter((rule) => {
+      const item = converted[rule.field];
+      return item && item.confirmed && typeof item.value === "number" && rule.test(item.value);
+    }).map((rule) => `${rule.label} ${rule.describe(converted[rule.field].value)}`);
+  }
+
+  function criticalBanner(report) {
+    const flags = criticalFlags(report);
+    if (!flags.length) return "";
+    return `
+      <div class="critical-flash" role="alert">
+        <strong>CRITICAL — notify consultant</strong>
+        <ul>${flags.map((flag) => `<li>${escapeHTML(flag)}</li>`).join("")}</ul>
+      </div>
+    `;
+  }
+
   function chips(report) {
     const tags = [];
     const status = report.severity.pH_status;
@@ -841,6 +887,7 @@
     };
     $("#report").className = "";
     $("#report").innerHTML = `
+      ${criticalBanner(report)}
       <section class="diagnosis-card">
         <div class="diagnosis-title">Diagnosis</div>
         <div class="lead-diagnosis">${escapeHTML(headline)}</div>
