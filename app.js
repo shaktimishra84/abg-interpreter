@@ -621,6 +621,13 @@
       // glucose (divide/multiply by 18).
       test: (v) => v < 70 / 18,
       describe: (v) => `${round(v * 18, 0)} mg/dL (critical: <70)`
+    },
+    {
+      field: "fio2",
+      label: "FiO2",
+      // fio2 is stored internally as a fraction (0-1); 60% = 0.6.
+      test: (v) => v > 0.6,
+      describe: (v) => `${round(v * 100, 0)}% (critical: >60%)`
     }
   ];
 
