@@ -16,11 +16,13 @@
 // a cent per scan at this app's volume, not worth trading transcription
 // accuracy for.
 //
-// Prompt caching: the instructions live in `system` with
-// cache_control:"ephemeral" so repeat scans within the cache TTL (~5 min)
-// reuse the cached prompt instead of paying for it again - the image
-// itself is never cacheable (it's different every call) and lives in
-// `messages`, not `system`.
+// No prompt caching: tried it (cache_control on the system prompt), but
+// verified against a live call that it never activates -
+// cache_creation_input_tokens came back 0. Anthropic requires a minimum
+// prompt size (~1024 tokens for Sonnet) before it'll create a cache
+// entry, and this transcription prompt is ~100 tokens. Padding it out
+// just to clear that floor would cost more than caching would ever save
+// - removed rather than leave in code that silently does nothing.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-5";
@@ -56,15 +58,11 @@ module.exports = async (req, res) => {
       headers: {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "prompt-caching-2024-07-31",
         "content-type": "application/json"
       },
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 1024,
-        system: [
-          { type: "text", text: TRANSCRIBE_PROMPT, cache_control: { type: "ephemeral" } }
-        ],
         messages: [
           {
             role: "user",
@@ -76,7 +74,8 @@ module.exports = async (req, res) => {
                   media_type: mediaType || "image/jpeg",
                   data: image
                 }
-              }
+              },
+              { type: "text", text: TRANSCRIBE_PROMPT }
             ]
           }
         ]
@@ -95,7 +94,7 @@ module.exports = async (req, res) => {
       .map((block) => block.text)
       .join("\n");
 
-    res.status(200).json({ text, cache: data.usage ? { cache_creation_input_tokens: data.usage.cache_creation_input_tokens, cache_read_input_tokens: data.usage.cache_read_input_tokens } : undefined });
+    res.status(200).json({ text });
   } catch (error) {
     res.status(502).json({ error: "Couldn't reach the scanning service. Try again, or use the paste-text option." });
   }
