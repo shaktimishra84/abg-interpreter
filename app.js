@@ -30,7 +30,7 @@
         { id: "potassium", label: "Potassium", units: ["mmol/L", "mEq/L"], required: true },
         { id: "chloride", label: "Chloride", units: ["mmol/L", "mEq/L"], required: true },
         { id: "lactate", label: "Lactate", units: ["mmol/L", "mg/dL", "mEq/L"], required: true },
-        { id: "albumin", label: "Albumin", units: ["g/L", "g/dL"], required: true },
+        { id: "albumin", label: "Albumin", units: ["g/dL", "g/L"], required: true },
         { id: "glucose", label: "Glucose", units: ["mg/dL", "mmol/L"] }
       ]
     },
@@ -76,7 +76,7 @@
     potassium: { min: "1", max: "10", title: "Usual potassium reference: 3.5-5.0 mmol/L" },
     chloride: { min: "60", max: "140", title: "Usual chloride reference: 95-110 mmol/L" },
     lactate: { min: "0", max: "30", title: "Lactate >=4 mmol/L is a danger flag" },
-    albumin: { min: "0", max: "60", title: "Albumin allows albumin-corrected anion gap calculation" },
+    albumin: { min: "0", max: "60", title: "Default is g/dL; Stewart and corrected AG use albumin converted to g/L" },
     glucose: { min: "0", max: "600", title: "Radiometer reports cGlu commonly in mg/dL" },
     age: { min: "0", max: "120", title: "Age helps screen the A-a gradient" }
   };
@@ -92,6 +92,7 @@
     sodium: ["126", "mmol/L"],
     potassium: ["3.6", "mmol/L"],
     chloride: ["142", "mmol/L"],
+    albumin: ["3.0", "g/dL"],
     lactate: ["12.1", "mmol/L"],
     glucose: ["49", "mg/dL"],
     measuredOsmolality: ["254.8", "mOsm/kg"],
@@ -703,16 +704,31 @@
 
   function treatmentCard(report) {
     const treatment = report.treatment_suggestions || {};
-    const safety = treatment.immediate_safety_actions || [];
-    const corrective = treatment.corrective_measures || [];
-    const steps = safety.length ? safety.slice(0, 4) : corrective.slice(0, 4);
+    const pick = (items, pattern) => {
+      const listItems = items || [];
+      return listItems.find((item) => pattern.test(item)) || listItems[0] || "";
+    };
+    const ventilation = treatment.ventilation_oxygenation || [];
+    let priority = [
+      pick(ventilation, /PaCO2|ventilatory/i),
+      pick(treatment.circulation_lactate, /Lactate|shock|sepsis/i),
+      pick(ventilation, /A-a gradient|oxygen transfer|PaO2/i),
+      pick(treatment.fluids_strong_ion, /strong ion|hyperchloremic|chloride/i),
+      pick(treatment.stewart_actions, /unmeasured|non-lactate|discordant|analyzer|verify/i),
+      pick(treatment.electrolytes, /potassium|magnesium|calcium|phosphate/i),
+      pick(treatment.renal_toxin_dka, /renal|toxic|DKA/i),
+      pick(treatment.bicarbonate, /bicarbonate/i)
+    ].filter(Boolean).filter((item, index, listItems) => listItems.indexOf(item) === index);
+    if (priority.length < 3) {
+      priority = (treatment.immediate_threats || []).concat(priority);
+    }
+    priority = priority.filter((item, index, listItems) => listItems.indexOf(item) === index).slice(0, 7);
     return `
       <section class="action-card">
-        <div class="action-kicker">Steps</div>
-        <h3>${escapeHTML(treatment.title || "Initial actions")}</h3>
-        <ol class="step-list">
-          ${steps.map((step, i) => `<li><strong>${i + 1}.</strong> ${escapeHTML(step)}</li>`).join("")}
-        </ol>
+        <div class="action-kicker">Emergency-use guidance</div>
+        <h3>${escapeHTML(treatment.title || "Corrective measures")}</h3>
+        <p class="action-summary">${escapeHTML(treatment.opening_summary || treatment.core_rule || "")}</p>
+        ${list(priority, "danger-line")}
         <p class="action-disclaimer">${escapeHTML(treatment.purpose || "")}</p>
       </section>
     `;
@@ -731,17 +747,40 @@
     const treatment = report.treatment_suggestions || {};
     return `
       <section class="report-block action-lead">
-        <h3>${escapeHTML(treatment.title || "Next steps")}</h3>
-        <p>${escapeHTML(treatment.purpose || "")}</p>
+        <h3>${escapeHTML(treatment.title || "Corrective measures")}</h3>
+        <p>${escapeHTML(treatment.opening_summary || "")}</p>
+        <p>${escapeHTML(treatment.core_rule || "")}</p>
       </section>
-      ${treatmentSection("Safety & immediate actions", treatment.immediate_safety_actions, "danger-line")}
-      ${treatmentSection("Corrective measures", treatment.corrective_measures, "warn-line")}
+      ${treatmentSection("A. Immediate threats", treatment.immediate_threats, "danger-line")}
+      ${treatmentSection("B. Ventilation and oxygenation", treatment.ventilation_oxygenation, "warn-line")}
+      ${treatmentSection("C. Circulation and lactate", treatment.circulation_lactate, "warn-line")}
+      ${treatmentSection("D. Fluids and strong ion/chloride effect", treatment.fluids_strong_ion, "warn-line")}
+      ${treatmentSection("Stewart-directed implications", treatment.stewart_actions, "warn-line")}
+      ${treatmentSection("E. Electrolytes", treatment.electrolytes, "warn-line")}
+      ${treatmentSection("F. Renal replacement / toxin / DKA pathway", treatment.renal_toxin_dka, "warn-line")}
+      ${treatmentSection("G. Bicarbonate statement", treatment.bicarbonate, "warn-line")}
       ${treatmentSection("Escalate if", treatment.escalation_triggers, "danger-line")}
+      <div class="clinical-warning">${escapeHTML(treatment.purpose || "")}</div>
     `;
+  }
+
+  function albuminDisplay(report) {
+    const albumin = report.unit_normalization.converted_inputs.albumin || {};
+    const rawValue = albumin.raw_value;
+    const rawUnit = albumin.raw_unit;
+    const converted = albumin.value;
+    if (rawValue !== "" && rawValue !== null && rawValue !== undefined && rawUnit === "g/dL") {
+      return `Albumin = ${rawValue} g/dL = ${converted} g/L`;
+    }
+    if (converted !== "" && converted !== null && converted !== undefined) {
+      return `Albumin = ${converted} g/L`;
+    }
+    return "Albumin not available";
   }
 
   function stewartWorkedSteps(report) {
     const s = report.stewart_light;
+    const albuminLine = albuminDisplay(report);
     const hasValue = (value) => value !== "" && value !== null && value !== undefined;
     const value = (item, unit) => hasValue(item) ? `${item}${unit ? ` ${unit}` : ""}` : "not available";
     const pHOutsideReferenceBand = Number(s.pH) < 7.3 || Number(s.pH) > 7.5;
@@ -806,6 +845,7 @@
           "Albumin / weak acid effect",
           "SBE_Albumin means Standard Base Excess attributable to albumin / weak acid effect.",
           [
+            ["Input", albuminLine],
             ["Formula", "SBE_Albumin = 0.3 x (40 - albumin in g/L)"],
             ["Calculation", `0.3 x (40 - ${value(s.albumin_g_per_L)}) = ${value(s.SBE_albumin, "mmol/L")}`],
             ["Result", `${value(s.SBE_albumin, "mmol/L")}: ${s.SBE_albumin_interpretation || "not available"}`]
@@ -838,6 +878,41 @@
           "This separates lactate-driven acidosis from additional non-lactate fixed acids such as ketones, uremic acids, toxic alcohol metabolites, salicylate, pyroglutamate, phosphate, or sulfate."
         )}
       </div>
+    `;
+  }
+
+  function stewartConclusion(report) {
+    const s = report.stewart_light || {};
+    if (!s.eligible) {
+      return `<div class="stewart-conclusion incomplete"><div class="action-kicker">Stewart conclusion</div><p>${escapeHTML(s.final_stewart_summary || "Stewart light is incomplete.")}</p></div>`;
+    }
+    const driverList = (title, items, tone) => {
+      const values = items || [];
+      return `
+        <div class="stewart-driver ${tone}">
+          <h4>${escapeHTML(title)}</h4>
+          ${values.length ? list(values, "") : `<p class="muted-line">No major component above the +/-2 mmol/L threshold.</p>`}
+        </div>
+      `;
+    };
+    return `
+      <section class="stewart-conclusion">
+        <div class="action-kicker">Stewart conclusion</div>
+        <h4>${escapeHTML(s.final_stewart_summary || "No overall inference available.")}</h4>
+        <div class="stewart-driver-grid">
+          ${driverList("Acidifying drivers", s.acidifying_drivers, "acidifying")}
+          ${driverList("Alkalinising drivers", s.alkalinising_drivers, "alkalinising")}
+        </div>
+        <div class="stewart-inference">
+          <h4>Clinical inference</h4>
+          ${list(s.clinical_inference, "")}
+        </div>
+        <div class="stewart-actions">
+          <h4>What this changes now</h4>
+          ${list(s.suggested_actions, "warn-line")}
+        </div>
+        ${(s.quality_flags || []).length ? `<div class="stewart-quality"><strong>Verify before acting</strong>${list(s.quality_flags, "warn-line")}</div>` : ""}
+      </section>
     `;
   }
 
@@ -927,6 +1002,7 @@
         <section class="report-tab-panel" data-report-panel="stewart" hidden>
           <section class="report-block">
             <h3>Stewart light analysis</h3>
+            ${stewartConclusion(report)}
             ${stewartWorkedSteps(report)}
             ${stewartStatus(report)}
           </section>

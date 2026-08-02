@@ -438,6 +438,8 @@
       Cl: NaN,
       pH: NaN,
       SBE: NaN,
+      albumin_raw_value: NaN,
+      albumin_raw_unit: "",
       albumin_g_per_L: NaN,
       lactate_mmol_per_L: NaN,
       Na_minus_Cl: NaN,
@@ -456,6 +458,11 @@
       ABE_interpretation: "",
       stewart_light_tags: [],
       final_stewart_summary: "",
+      acidifying_drivers: [],
+      alkalinising_drivers: [],
+      clinical_inference: [],
+      suggested_actions: [],
+      quality_flags: [],
       missing_inputs: [],
       unit_warnings: [],
       interpretation: [],
@@ -506,6 +513,8 @@
     out.Cl = v.chloride.value;
     out.pH = v.pH.value;
     out.SBE = v.sbe.value;
+    out.albumin_raw_value = v.albumin.rawValue;
+    out.albumin_raw_unit = v.albumin.rawUnit || v.albumin.internalUnit || "g/L";
     out.albumin_g_per_L = v.albumin.value;
     out.lactate_mmol_per_L = lactateUnitProblem ? NaN : v.lactate.value;
     out.Na_minus_Cl = out.Na - out.Cl;
@@ -593,29 +602,92 @@
       }
     }
 
-    const drivers = [];
-    if (out.SBE_SID < -2) drivers.push("strong ion acidosis");
-    if (out.SBE_SID > 2) drivers.push("strong ion alkalosis");
-    if (out.SBE_albumin > 2) drivers.push("hypoalbuminemic alkalosis");
-    if (out.SBE_albumin < -2) drivers.push("weak acid acidosis");
-    if (out.SBE_unmeasured_ions < -2) drivers.push("unmeasured anion acidosis");
-    if (out.SBE_unmeasured_ions > 2) drivers.push("possible unmeasured cation or analytical/unit issue");
-    if (has(out.residual_UI_after_lactate) && out.residual_UI_after_lactate < -2) drivers.push("additional non-lactate fixed-acid burden");
-    if (has(out.ABE) && out.ABE > 2) drivers.push("non-lactate alkalinising component");
+    const signed = (value) => `${value > 0 ? "+" : ""}${rounded(value)}`;
+    const addUnique = (items, item) => {
+      if (item && !items.includes(item)) items.push(item);
+    };
 
-    if (drivers.length) {
-      out.final_stewart_summary = `Mixed metabolic pattern with ${drivers.join(", ")}.`;
-    } else {
-      out.final_stewart_summary = "No major Stewart metabolic driver by the +/-2 mmol/L thresholds.";
+    if (out.SBE_SID < -2) {
+      addUnique(out.acidifying_drivers, `Strong ion effect (${signed(out.SBE_SID)} mmol/L)`);
+      addUnique(out.clinical_inference, `The sodium-chloride relationship contributes a ${Math.abs(rounded(out.SBE_SID))} mmol/L acidifying effect, consistent with low strong ion difference / relative hyperchloremia.`);
+      addUnique(out.suggested_actions, "Low strong ion difference is contributing to acidosis. Avoid further unnecessary 0.9% saline; prefer balanced crystalloid if fluid is required and appropriate.");
+    } else if (out.SBE_SID > 2) {
+      addUnique(out.alkalinising_drivers, `Strong ion effect (${signed(out.SBE_SID)} mmol/L)`);
+      addUnique(out.clinical_inference, `The sodium-chloride relationship contributes a ${rounded(out.SBE_SID)} mmol/L alkalinising effect, consistent with high strong ion difference / relative hypochloremia.`);
+      addUnique(out.suggested_actions, "A high strong ion difference is contributing to alkalosis. Assess chloride and volume depletion; consider sodium chloride and potassium chloride replacement only when clinically appropriate, and avoid blind saline loading if overloaded or hypertensive.");
     }
-    if (Math.abs(out.SBE) <= 2 && drivers.length) {
-      out.final_stewart_summary += " SBE is near zero, so opposing metabolic processes may be masking each other.";
+
+    if (out.SBE_albumin > 2) {
+      addUnique(out.alkalinising_drivers, `Low-albumin effect (${signed(out.SBE_albumin)} mmol/L)`);
+      addUnique(out.clinical_inference, `Low albumin contributes a ${rounded(out.SBE_albumin)} mmol/L alkalinising effect and may conceal the severity of an acidifying process.`);
+      addUnique(out.suggested_actions, "Recognise the alkalinising albumin effect when judging the anion gap and base excess. Do not replace albumin solely to correct this calculated component; use a separate clinical indication and consultant review.");
+    } else if (out.SBE_albumin < -2) {
+      addUnique(out.acidifying_drivers, `Albumin / weak acid effect (${signed(out.SBE_albumin)} mmol/L)`);
+      addUnique(out.clinical_inference, `The albumin / weak acid component contributes a ${Math.abs(rounded(out.SBE_albumin))} mmol/L acidifying effect.`);
+      addUnique(out.suggested_actions, "A high-albumin / weak-acid effect is contributing. Confirm the albumin value and unit and treat the underlying clinical cause rather than the calculated component alone.");
+    }
+
+    if (out.SBE_unmeasured_ions < -2) {
+      addUnique(out.acidifying_drivers, `Unmeasured anion effect (${signed(out.SBE_unmeasured_ions)} mmol/L)`);
+      addUnique(out.clinical_inference, `Unmeasured anions contribute a ${Math.abs(rounded(out.SBE_unmeasured_ions))} mmol/L acidifying effect.`);
+    } else if (out.SBE_unmeasured_ions > 2) {
+      addUnique(out.alkalinising_drivers, `Positive unmeasured-ion component (${signed(out.SBE_unmeasured_ions)} mmol/L)`);
+      addUnique(out.clinical_inference, "The positive unmeasured-ion component is physiologically discordant and may represent an opposing alkalinising process, unmeasured cation, or input/sample/analyzer error.");
+      addUnique(out.suggested_actions, "The positive unmeasured-ion component should not trigger treatment for a rare cause until sodium, chloride, albumin, SBE, units, sample quality, and analyzer output are verified.");
+      addUnique(out.quality_flags, "Positive SBE_UI: verify units, transcription, sample quality, and analyzer output before inferring an unmeasured cation.");
+    }
+
+    if (has(out.residual_UI_after_lactate)) {
+      if (out.residual_UI_after_lactate < -2) {
+        addUnique(out.clinical_inference, `After accounting for lactate, ${Math.abs(rounded(out.residual_UI_after_lactate))} mmol/L of additional acidifying unmeasured-ion effect remains; lactate does not fully explain the fixed-acid burden.`);
+        addUnique(out.suggested_actions, "Additional non-lactate fixed-acid burden remains after lactate. Prioritise the clinically relevant ketone, renal failure, toxin, salicylate, phosphate/sulfate, or pyroglutamate pathway.");
+      } else if (out.residual_UI_after_lactate > 2) {
+        addUnique(out.clinical_inference, `After accounting for lactate, a ${rounded(out.residual_UI_after_lactate)} mmol/L alkalinising or discordant residual remains.`);
+        addUnique(out.suggested_actions, "The lactate-adjusted residual remains positive. Verify inputs and sample/analyzer consistency and assess for an opposing alkalinising process before considering rare unmeasured cations.");
+        addUnique(out.quality_flags, "Positive lactate-adjusted residual: verify the input set and assess for an opposing alkalinising process.");
+      } else {
+        addUnique(out.clinical_inference, "Lactate explains most of the unmeasured anion effect; additional non-lactate fixed-acid burden appears limited.");
+      }
+    }
+
+    if (has(out.ABE)) {
+      if (out.ABE < -5) {
+        addUnique(out.clinical_inference, `Alactic Base Excess is ${signed(out.ABE)} mmol/L, confirming a significant non-lactate metabolic acid burden.`);
+      } else if (out.ABE < -2) {
+        addUnique(out.clinical_inference, `Alactic Base Excess is ${signed(out.ABE)} mmol/L, supporting residual non-lactate metabolic acidosis.`);
+      } else if (out.ABE > 2) {
+        addUnique(out.clinical_inference, `Alactic Base Excess is ${signed(out.ABE)} mmol/L, supporting a non-lactate alkalinising component.`);
+      } else {
+        addUnique(out.clinical_inference, `Alactic Base Excess is ${signed(out.ABE)} mmol/L, so the net non-lactate metabolic component is near neutral.`);
+      }
+    }
+
+    if (Math.abs(out.SBE_SID) > 20) {
+      addUnique(out.quality_flags, "The calculated strong-ion component is unusually large. Reconfirm sodium and chloride values, units, transcription, and sample/analyzer validity.");
+    }
+
+    if (out.acidifying_drivers.length && out.alkalinising_drivers.length) {
+      out.final_stewart_summary = `Opposing metabolic processes are present. Acidifying drivers: ${out.acidifying_drivers.join(", ")}. Alkalinising drivers: ${out.alkalinising_drivers.join(", ")}.`;
+    } else if (out.acidifying_drivers.length) {
+      out.final_stewart_summary = `The metabolic component is acidifying, driven by ${out.acidifying_drivers.join(", ")}.`;
+    } else if (out.alkalinising_drivers.length) {
+      out.final_stewart_summary = `The metabolic component is alkalinising, driven by ${out.alkalinising_drivers.join(", ")}.`;
+    } else {
+      out.final_stewart_summary = "No major Stewart metabolic driver is identified by the +/-2 mmol/L thresholds.";
+    }
+    if (Math.abs(out.SBE) <= 2 && (out.acidifying_drivers.length || out.alkalinising_drivers.length)) {
+      out.final_stewart_summary += " SBE is near zero, but this reflects opposing processes rather than true metabolic normality.";
+    }
+    if (has(out.residual_UI_after_lactate) && out.residual_UI_after_lactate < -2) {
+      out.final_stewart_summary += " Lactate does not fully explain the unmeasured acid burden; additional non-lactate fixed acids remain.";
+    } else if (has(out.residual_UI_after_lactate) && Math.abs(out.residual_UI_after_lactate) <= 2 && out.SBE_unmeasured_ions < -2) {
+      out.final_stewart_summary += " Lactate explains most of the unmeasured anion effect.";
     }
     if (out.SBE_albumin > 2 && (out.SBE_unmeasured_ions < -2 || (has(out.ABE) && out.ABE < -2))) {
-      out.final_stewart_summary += " Hypoalbuminemia may be masking the severity of metabolic acidosis.";
+      out.final_stewart_summary += " Hypoalbuminemic alkalosis is masking part of the metabolic acidosis.";
     }
-    if (out.SBE_unmeasured_ions > 2) {
-      out.final_stewart_summary += " Check units and analyzer/sample error before rare unmeasured cations.";
+    if (out.quality_flags.length) {
+      out.final_stewart_summary += " Verify the flagged inputs and analyzer/sample consistency before acting on discordant components.";
     }
     if (out.blockedReason) out.final_stewart_summary += ` ${out.blockedReason}`;
 
@@ -738,10 +810,15 @@
     return { causes, recommendedMissingTests: Array.from(tests) };
   }
 
-  function treatmentSuggestions(v, primary, metabolic, compensationResult, oxy, flags, validation) {
-    const repeatConfirm = [];
-    const safetyActions = [];
-    const correctiveMeasures = [];
+  function treatmentSuggestions(v, primary, metabolic, compensationResult, stewart, abe, oxy, flags, validation) {
+    const immediateThreats = [];
+    const ventilationOxygenation = [];
+    const circulationLactate = [];
+    const fluidsStrongIon = [];
+    const electrolytes = [];
+    const renalToxinDka = [];
+    const bicarbonate = [];
+    const stewartActions = [];
     const escalationTriggers = [];
     const bedsideSummary = [];
     const t = primary.tendencies || {};
@@ -754,146 +831,178 @@
       (compensationResult.lines || []).some((line) => line.toLowerCase().includes("additional"));
     const metabolicAcidosis = t.metabolicAcidosis || (has(v.sbe.value) && v.sbe.value < -2);
     const metabolicAlkalosis = t.metabolicAlkalosis || (has(v.sbe.value) && v.sbe.value > 2);
-    const respiratoryAcidosis = t.respiratoryAcidosis ||
-      (compensationResult.lines || []).some((line) => line.toLowerCase().includes("additional respiratory acidosis"));
-    const respiratoryAlkalosis = t.respiratoryAlkalosis ||
-      (compensationResult.lines || []).some((line) => line.toLowerCase().includes("additional respiratory alkalosis"));
-    const highAG = metabolic.anionGapCategory === "high anion gap";
+    const compensationText = (compensationResult.lines || []).join(" ").toLowerCase();
+    const paCO2HigherThanExpected = compensationText.includes("higher") && compensationText.includes("additional respiratory acidosis");
+    const paCO2LowerThanExpected = compensationText.includes("lower") && compensationText.includes("additional respiratory alkalosis");
+    const respiratoryAcidosis = t.respiratoryAcidosis || paCO2HigherThanExpected;
+    const respiratoryAlkalosis = t.respiratoryAlkalosis || paCO2LowerThanExpected;
     const normalAGAcidosis = metabolicAcidosis && (metabolic.anionGapCategory === "normal anion gap" || metabolic.anionGapCategory === "low anion gap");
     const lowUrineChloride = has(v.urineChloride.value) && v.urineChloride.value < 20;
     const highUrineChloride = has(v.urineChloride.value) && v.urineChloride.value >= 25;
     const chlorideResponsive = metabolicAlkalosis && (lowUrineChloride || hasFlag("vomiting") || hasFlag("diuretics"));
     const chlorideResistant = metabolicAlkalosis && (highUrineChloride || hasFlag("hypertension"));
     const potassium = v.potassium.value;
+    const chlorideEffect = (has(v.chloride.value) && v.chloride.value > 110) || (stewart.eligible && has(stewart.SBE_SID) && stewart.SBE_SID < -2);
+    const albuminLow = has(v.albumin.value) && v.albumin.value < 35;
+    const uiNegative = stewart.eligible && has(stewart.SBE_unmeasured_ions) && stewart.SBE_unmeasured_ions < -2;
+    const residualNearNeutral = stewart.eligible && has(stewart.residual_UI_after_lactate) && Math.abs(stewart.residual_UI_after_lactate) <= 2;
+    const lactateHigh = has(v.lactate.value) && v.lactate.value >= 4;
+    const lactateElevated = has(v.lactate.value) && v.lactate.value > 2;
+    const aaHigh = has(oxy.A_a_gradient) && String(oxy.interpretation || "").toLowerCase().includes("elevated");
+    const severePH = has(v.pH.value) && (v.pH.value < 7.1 || v.pH.value > 7.6);
+    const renalConcern = hasFlag("renalFailure") || (has(v.creatinine.value) && v.creatinine.value >= 2) ||
+      (metabolicAcidosis && severePH) || (has(potassium) && potassium >= 6);
+    const toxinConcern = hasFlag("toxicAlcohol") || hasFlag("salicylate") || (has(metabolic.osmolalGap) && metabolic.osmolalGap > 10);
+    const dkaConcern = metabolicAcidosis &&
+      ((has(v.betaHydroxybutyrate.value) && v.betaHydroxybutyrate.value >= 3) ||
+      (has(v.glucose.value) && v.glucose.value >= 13.9 && metabolic.anionGapCategory === "high anion gap"));
+    const summaryParts = [];
 
-    addMany(repeatConfirm, [
-      "Repeat ABG/VBG if the result does not match the clinical picture.",
-      "Confirm serum sodium, potassium, chloride, bicarbonate, urea/creatinine, lactate, glucose, and albumin.",
-      "Check glucose and ketones when acidosis is present.",
-      "Get an ECG if potassium abnormality is present or suspected."
-    ]);
-    if (metabolicAlkalosis) add(repeatConfirm, "Check urine chloride to separate chloride-responsive from saline-unresponsive alkalosis.");
-    if (normalAGAcidosis) add(repeatConfirm, "Check urine anion gap or urine osmolal gap if normal-anion-gap acidosis is present.");
+    if (metabolicAcidosis && respiratoryAcidosis) summaryParts.push("mixed metabolic acidosis with additional respiratory acidosis");
+    else if (metabolicAcidosis) summaryParts.push("metabolic acidosis");
+    else if (metabolicAlkalosis) summaryParts.push("metabolic alkalosis");
+    else if (respiratoryAcidosis) summaryParts.push("respiratory acidosis");
+    else if (respiratoryAlkalosis) summaryParts.push("respiratory alkalosis");
+    else summaryParts.push(primary.pHStatus.toLowerCase());
+    if (lactateHigh) summaryParts.push("significant hyperlactatemia");
+    else if (lactateElevated) summaryParts.push("elevated lactate");
+    if (chlorideEffect) summaryParts.push("low strong ion/hyperchloremic acidosis");
+    if (albuminLow) summaryParts.push("low albumin with alkalinising effect");
+    if (uiNegative) summaryParts.push("unmeasured anion effect");
+    if (aaHigh) summaryParts.push("impaired oxygen transfer suggested by high A-a gradient");
 
-    if (has(v.pH.value) && (v.pH.value < 7.1 || v.pH.value > 7.6)) {
-      add(safetyActions, "Critical pH range: escalate early while treating the immediate threat.");
+    if (metabolicAcidosis && respiratoryAcidosis) {
+      add(immediateThreats, "Mixed metabolic and respiratory acidosis is present. Treat the metabolic cause and ventilatory failure simultaneously.");
     }
-    if (respiratoryAcidosis || (has(v.pH.value) && v.pH.value < 7.2 && has(v.paCO2.value) && v.paCO2.value > 45)) {
-      add(safetyActions, "Assess airway and breathing immediately; support oxygenation and ventilation if there is exhaustion, low GCS, severe hypoxemia, or rising PaCO2.");
+    if (severePH) add(immediateThreats, "Severe pH abnormality is present. Escalate early while treating the immediate airway, breathing, circulation, potassium, renal, toxin, or DKA threat.");
+    if (respiratoryAcidosis || paCO2HigherThanExpected) add(immediateThreats, "Prioritise airway and breathing assessment because ventilatory failure may be contributing.");
+    if (lactateHigh || hasFlag("shock") || hasFlag("sepsis")) add(immediateThreats, "Treat possible shock, sepsis, hypoxia, or tissue ischemia as an immediate threat until proven otherwise.");
+    if (has(potassium) && (potassium < 3 || potassium > 5.5)) add(immediateThreats, "Dangerous potassium abnormality risk is present. Use cardiac monitoring and correct potassium according to ICU protocol.");
+    if (renalConcern) add(immediateThreats, "Renal failure, severe acidosis, hyperkalemia, or oliguria risk should trigger early consultant/nephrology discussion.");
+    if (toxinConcern) add(immediateThreats, "Toxic alcohol or salicylate risk should trigger the toxin pathway and urgent toxicology/nephrology discussion.");
+    if (dkaConcern) add(immediateThreats, "Diabetic ketoacidosis pattern is possible. Use the local DKA pathway with potassium-guided insulin and fluids if clinically suspected.");
+
+    if (paCO2HigherThanExpected) {
+      add(ventilationOxygenation, "Measured PaCO2 is higher than expected, suggesting added ventilatory failure. Escalate airway and breathing assessment.");
+      add(ventilationOxygenation, "Consider non-invasive ventilation or intubation depending on sensorium, work of breathing, oxygenation, shock, vomiting, and aspiration risk.");
+    } else if (respiratoryAcidosis) {
+      add(ventilationOxygenation, "Respiratory acidosis is present. Assess airway, ventilation, sensorium, work of breathing, oxygenation, and aspiration risk.");
+      add(ventilationOxygenation, "Consider ventilatory support depending on clinical status, and treat reversible drivers such as bronchospasm, pneumonia, sedatives, opioid effect, neuromuscular weakness, or ventilator hypoventilation.");
     }
-    if (has(v.paO2.value) && v.paO2.value < 60) {
-      add(safetyActions, "Treat hypoxemia first with oxygen and ventilatory support as clinically indicated.");
+    if (respiratoryAlkalosis) {
+      add(ventilationOxygenation, "Respiratory alkalosis is present. Treat hypoxemia, sepsis, fever, pain, anxiety, pneumonia, pulmonary embolism risk, or excessive ventilator minute ventilation as clinically appropriate.");
+      add(ventilationOxygenation, "Do not sedate solely to normalize PaCO2 unless sedation is clinically required.");
     }
-    if (has(oxy.A_a_gradient) && oxy.A_a_gradient > 20) {
-      add(safetyActions, "Elevated A-a gradient: look for V/Q mismatch, pneumonia, edema, ARDS, pulmonary embolism, or shunt physiology.");
+    if (aaHigh) {
+      add(ventilationOxygenation, "High A-a gradient suggests impaired oxygen transfer. Evaluate for pneumonia, pulmonary edema, ARDS, pulmonary embolism, atelectasis, or shunt.");
+      add(ventilationOxygenation, "Correlate the oxygenation abnormality with chest imaging, oxygen requirement, and bedside respiratory trajectory.");
+    } else if (has(v.paO2.value) && v.paO2.value < 60) {
+      add(ventilationOxygenation, "PaO2 is low. Support oxygenation and ventilation according to clinical status.");
     }
-    if (hasFlag("shock") || hasFlag("sepsis") || (has(v.lactate.value) && v.lactate.value >= 4)) {
-      add(safetyActions, "Treat shock/sepsis early: oxygenation, appropriate fluids, vasopressors if needed, antibiotics/source control when sepsis is suspected, and repeat lactate.");
+
+    if (lactateHigh) {
+      add(circulationLactate, "Lactate is significantly elevated. Treat possible shock, sepsis, hypoxia, or tissue ischemia and repeat lactate after resuscitation.");
+      add(circulationLactate, "Support oxygenation, optimise perfusion, use vasopressors if needed, and start cultures, antibiotics, and source control if sepsis is clinically suspected.");
+    } else if (lactateElevated) {
+      add(circulationLactate, "Lactate is elevated. Optimise oxygen delivery and perfusion, then repeat lactate based on clinical trajectory.");
+    }
+    if (hasFlag("shock") || hasFlag("sepsis")) {
+      add(circulationLactate, "Shock or sepsis context is flagged. Prioritise perfusion, source control, and ongoing reassessment.");
+    }
+
+    if (chlorideEffect) {
+      add(fluidsStrongIon, "Low strong ion difference/hyperchloremic effect is acidifying the patient. Avoid further unnecessary 0.9% saline; use balanced crystalloid if fluid is required and appropriate.");
+    }
+    if (normalAGAcidosis && !chlorideEffect) {
+      add(fluidsStrongIon, "Normal-anion-gap acidosis is present. Treat likely gastrointestinal or renal bicarbonate loss according to context, and avoid excess chloride load.");
+    }
+    if (chlorideResponsive && !chlorideResistant) {
+      add(fluidsStrongIon, "Chloride-responsive metabolic alkalosis is likely. Consider sodium chloride and potassium chloride replacement if hypovolemic.");
+    }
+    if (chlorideResistant) {
+      add(fluidsStrongIon, "Chloride-resistant or saline-unresponsive alkalosis is possible. Replace potassium and magnesium, avoid blind saline loading if hypertensive or overloaded, and evaluate mineralocorticoid or renal chloride-wasting causes.");
+    }
+    if (albuminLow) {
+      add(fluidsStrongIon, "Low albumin has an alkalinising effect and may mask the severity of metabolic acidosis. Interpret anion gap and base excess accordingly.");
+    }
+    if (uiNegative) {
+      add(fluidsStrongIon, "Unmeasured anion effect is contributing. Correlate with lactate, ketones, renal failure, toxins, phosphate, sulfate, or pyroglutamate depending on context.");
+    }
+    if (residualNearNeutral) {
+      add(fluidsStrongIon, "Lactate explains most of the unmeasured anion effect; additional non-lactate fixed acid burden appears limited.");
+    }
+    if (stewart.eligible) {
+      (stewart.suggested_actions || []).forEach((item) => add(stewartActions, item));
+    }
+
+    add(electrolytes, "Correct potassium, magnesium, calcium, and phosphate according to ICU protocol.");
+    if (has(potassium) && potassium >= 6) {
+      add(electrolytes, "Hyperkalemia is urgent if ECG changes, rapid rise, renal failure, or severe acidosis are present: stabilise membrane when indicated, shift potassium, remove potassium, and stop potassium-raising drugs according to local protocol.");
+    } else if (has(potassium) && potassium > 5.5) {
+      add(electrolytes, "Potassium is elevated. Use ECG monitoring, stop potassium-raising drugs, and treat urgently if ECG changes, rapid rise, renal failure, or severe acidosis is present.");
+    } else if (has(potassium) && potassium < 3) {
+      add(electrolytes, "Hypokalemia is urgent with arrhythmia risk, weakness, digoxin use, or alkalosis: replace potassium chloride and correct magnesium according to ICU protocol.");
     }
     if (has(potassium) && (potassium < 3 || potassium > 5.5)) {
-      add(safetyActions, "Put the patient on cardiac monitoring for dangerous potassium abnormality or severe acid-base disturbance.");
-    }
-    if (hasFlag("diuretics") || hasFlag("acetazolamide") || hasFlag("renalFailure") || hasFlag("shock")) {
-      add(safetyActions, "Stop or review obvious contributors: diuretics, acetazolamide/topiramate, metformin in shock/AKI, ACE inhibitor/ARB/MRA with hyperkalemia, and excess normal saline.");
+      add(electrolytes, "ECG monitoring is appropriate when potassium is abnormal or acidosis is severe.");
     }
 
-    if (metabolicAcidosis) {
-      addMany(correctiveMeasures, [
-        "Metabolic acidosis: calculate anion gap, correct it for albumin, check Winter compensation, and treat the cause rather than the pH alone.",
-        "If PaCO2 is higher than expected, treat this as added ventilatory failure and consider NIV or intubation according to clinical status.",
-        "If PaCO2 is lower than expected, look for sepsis, hypoxia, liver disease, pain, pulmonary embolism, or another respiratory alkalosis driver."
-      ]);
-      if (highAG) {
-        addMany(correctiveMeasures, [
-          "High-anion-gap acidosis: treat shock and hypoxia first, measure or repeat lactate, and check ketones, renal function, salicylate/toxic alcohol risk, ischemia, seizure, or post-arrest state.",
-          "If diabetic ketoacidosis is suspected, start the local IV fluid, insulin, and potassium-guided protocol.",
-          "If renal failure with severe acidosis, hyperkalemia, pulmonary edema, or uremic complication is present, discuss urgent renal replacement therapy.",
-          "If toxic alcohol or salicylate is suspected, send osmolar gap/toxicology and activate the antidote/dialysis pathway.",
-          "Sodium bicarbonate is not routine; consider it only as a temporary bridge in severe acidemia with instability, severe hyperkalemia, renal failure, or bicarbonate-loss acidosis while definitive treatment starts."
-        ]);
-      }
-      if (normalAGAcidosis) {
-        addMany(correctiveMeasures, [
-          "Normal-anion-gap or hyperchloremic acidosis: stop unnecessary 0.9% saline and use balanced crystalloid if ongoing resuscitation is needed.",
-          "Replace volume and potassium when gastrointestinal bicarbonate loss is likely.",
-          "Check urine anion gap or urine osmolal gap if renal tubular acidosis is suspected.",
-          "If severe bicarbonate-loss acidosis is present, bicarbonate replacement may be considered under consultant direction."
-        ]);
-      }
+    if (renalConcern) {
+      add(renalToxinDka, "Review renal function and urine output. If acidosis worsens with oliguria, hyperkalemia, fluid overload, or uremic features, discuss renal replacement therapy.");
+    }
+    if (toxinConcern) {
+      add(renalToxinDka, "Activate the toxic alcohol/salicylate pathway if clinically suspected, with urgent toxicology and nephrology discussion.");
+    }
+    if (dkaConcern) {
+      add(renalToxinDka, "Start the local DKA protocol if clinically suspected, using potassium-guided insulin and fluids.");
     }
 
-    if (metabolicAlkalosis) {
-      addMany(correctiveMeasures, [
-        "Metabolic alkalosis: assess volume status, potassium, magnesium, urine chloride, vomiting/NG suction, diuretics, and mineralocorticoid exposure."
-      ]);
-      if (chlorideResponsive && !chlorideResistant) {
-        addMany(correctiveMeasures, [
-          "Likely chloride-responsive alkalosis: give 0.9% saline if hypovolemic, replace potassium chloride, correct magnesium, reduce causative diuretics when possible, and treat vomiting or gastric loss.",
-          "Monitor potassium and pH repeatedly during correction."
-        ]);
-      } else if (chlorideResistant) {
-        addMany(correctiveMeasures, [
-          "Likely chloride-resistant or saline-unresponsive alkalosis: replace potassium chloride and magnesium, avoid blind saline loading if hypertensive or overloaded, stop causative diuretics if possible, and evaluate mineralocorticoid or renal chloride-wasting causes.",
-          "Mineralocorticoid antagonist or amiloride decisions should be consultant-led."
-        ]);
-      } else {
-        add(correctiveMeasures, "If alkalosis mechanism is unclear, urine chloride helps decide between saline/KCl-responsive loss and saline-unresponsive renal/mineralocorticoid patterns.");
-      }
-    }
-
-    if (respiratoryAcidosis) {
-      addMany(correctiveMeasures, [
-        "Respiratory acidosis: assess airway immediately, give controlled oxygen, and start NIV when appropriate if the patient is awake, cooperative, protecting the airway, and not in severe shock or vomiting.",
-        "Intubate or escalate if low GCS, severe work of breathing, refractory hypoxemia, shock, aspiration risk, or NIV failure is present.",
-        "Treat the driver: bronchodilator/steroid/antibiotic when indicated, naloxone for opioid effect, reduce sedatives, address neuromuscular weakness, or adjust ventilator settings.",
-        "Avoid rapid overcorrection in chronic CO2 retainers unless life-threatening."
-      ]);
-    }
-
-    if (respiratoryAlkalosis) {
-      addMany(correctiveMeasures, [
-        "Respiratory alkalosis: check oxygenation and A-a gradient if available, then treat hypoxemia, sepsis, fever, pain, anxiety, pneumonia, or pulmonary embolism risk.",
-        "If mechanically ventilated, reduce excessive respiratory rate or tidal volume only when clinically safe.",
-        "Do not sedate solely to normalize PaCO2 unless sedation is clinically required."
-      ]);
-    }
-
-    if (has(potassium) && potassium >= 6) {
-      addMany(correctiveMeasures, [
-        "Hyperkalemia danger: obtain ECG/cardiac monitoring, give calcium gluconate for ECG changes or severe hyperkalemia, shift potassium with insulin/dextrose and nebulised salbutamol, consider sodium bicarbonate if significant metabolic acidosis is present, remove potassium with diuresis/binder/dialysis as appropriate, and stop potassium-raising drugs."
-      ]);
-    } else if (has(potassium) && potassium > 5.5) {
-      add(correctiveMeasures, "Hyperkalemia risk: repeat potassium, ECG/cardiac monitoring, stop potassium-raising drugs, and treat urgently if ECG changes, rapid rise, renal failure, or severe acidosis is present.");
-    }
-    if (has(potassium) && potassium < 3) {
-      add(correctiveMeasures, "Hypokalemia danger: replace potassium chloride, use cardiac monitoring if severe or arrhythmia is present, correct magnesium, and avoid insulin or bicarbonate unless absolutely required because they can worsen hypokalemia.");
-    }
+    add(bicarbonate, "Do not give bicarbonate routinely. Consider it only as a temporary bridge in severe acidemia with hemodynamic instability, severe hyperkalemia, renal failure, or bicarbonate-loss acidosis, after consultant review.");
 
     if (has(v.pH.value) && v.pH.value < 7.1) add(escalationTriggers, "pH <7.10.");
     if (has(v.pH.value) && v.pH.value > 7.6) add(escalationTriggers, "pH >7.60.");
     if (respiratoryAcidosis) add(escalationTriggers, "PaCO2 rising with drowsiness, fatigue, or ventilatory failure.");
     if (has(potassium) && potassium >= 6) add(escalationTriggers, "Potassium >=6.0 mmol/L or ECG changes.");
     if (has(potassium) && potassium < 2.5) add(escalationTriggers, "Potassium <2.5 mmol/L or arrhythmia.");
-    if (has(v.lactate.value) && v.lactate.value >= 4) add(escalationTriggers, "Lactate >=4 mmol/L, rising lactate, or shock.");
-    if (hasFlag("renalFailure")) add(escalationTriggers, "Severe renal failure, oliguria, hyperkalemia, pulmonary edema, or uremic complication.");
-    if (hasFlag("toxicAlcohol") || hasFlag("salicylate") || (has(metabolic.osmolalGap) && metabolic.osmolalGap > 10)) add(escalationTriggers, "Suspected toxic alcohol or salicylate poisoning.");
+    if (lactateHigh) add(escalationTriggers, "Lactate >=4 mmol/L, rising lactate, or shock.");
+    if (renalConcern) add(escalationTriggers, "Severe renal failure, oliguria, hyperkalemia, pulmonary edema, or uremic complication.");
+    if (toxinConcern) add(escalationTriggers, "Suspected toxic alcohol or salicylate poisoning.");
     if (mixedDisorder) add(escalationTriggers, "Severe or clinically worsening mixed acid-base disorder.");
     add(escalationTriggers, "Need for intubation, vasopressor, or renal replacement therapy.");
 
-    if (metabolicAcidosis && (hasFlag("shock") || hasFlag("sepsis") || (has(v.lactate.value) && v.lactate.value >= 4))) add(bedsideSummary, "Acidosis plus shock/lactate: resuscitate, oxygenate, give source control/antibiotics when sepsis is suspected, use vasopressors if needed, and trend lactate.");
-    if (metabolicAcidosis && respiratoryAcidosis) add(bedsideSummary, "Acidosis plus high CO2: support ventilation.");
-    if (metabolicAcidosis && highAG) add(bedsideSummary, "Acidosis plus high anion gap: follow lactate, ketone, renal failure, toxin, ischemia, seizure, or post-arrest pathway.");
-    if (normalAGAcidosis) add(bedsideSummary, "Acidosis plus normal anion gap: consider diarrhea, renal tubular acidosis, or saline pathway; replace fluid and potassium and avoid excess saline.");
+    if (metabolicAcidosis && (hasFlag("shock") || hasFlag("sepsis") || lactateHigh)) add(bedsideSummary, "Acidosis plus shock/lactate: resuscitate, oxygenate, use source control/antibiotics when sepsis is suspected, use vasopressors if needed, and trend lactate.");
+    if (metabolicAcidosis && respiratoryAcidosis) add(bedsideSummary, "Acidosis plus high PaCO2: support ventilation while treating the metabolic cause.");
+    if (metabolicAcidosis && metabolic.anionGapCategory === "high anion gap") add(bedsideSummary, "High-anion-gap acidosis: prioritise lactate, ketone, renal failure, toxin, ischemia, seizure, or post-arrest pathways based on clinical context.");
+    if (normalAGAcidosis) add(bedsideSummary, "Normal-anion-gap acidosis: consider diarrhea, renal tubular acidosis, or saline pathway; replace fluid and potassium and avoid excess saline.");
     if (chlorideResponsive) add(bedsideSummary, "Alkalosis with vomiting/diuretic/low chloride: saline plus potassium chloride and magnesium correction if hypovolemic.");
     if (chlorideResistant) add(bedsideSummary, "Alkalosis with hypertension or high urine chloride: potassium chloride and magnesium, avoid blind saline, and evaluate mineralocorticoid or renal causes.");
     if (has(potassium) && (potassium < 3 || potassium > 5.5)) add(bedsideSummary, "Any dangerous potassium abnormality: treat potassium first.");
     if (!bedsideSummary.length) add(bedsideSummary, "Treat the immediate threat first: airway/breathing, shock/sepsis/hypoxia, dangerous potassium, renal failure/toxin/DKA, or ongoing gastrointestinal/renal electrolyte loss.");
 
+    const correctiveMeasures = []
+      .concat(ventilationOxygenation)
+      .concat(circulationLactate)
+      .concat(fluidsStrongIon)
+      .concat(stewartActions)
+      .concat(electrolytes)
+      .concat(renalToxinDka)
+      .concat(bicarbonate);
+    const safetyActions = immediateThreats.length ? immediateThreats : bedsideSummary.slice(0, 2);
+
     return {
-      title: "Initial corrective measures",
+      title: "Corrective measures",
+      opening_summary: `This pattern suggests ${summaryParts.join(", ")}.`,
       purpose: "Initial stabilisation only. Final diagnosis, dose, fluid choice, ventilator strategy, renal replacement therapy, and definitive treatment should be decided by the consultant.",
       core_rule: "Do not treat pH alone. Treat the immediate threat: airway/breathing, shock/sepsis/hypoxia, dangerous potassium abnormality, renal failure/toxin/DKA, or ongoing gastrointestinal/renal electrolyte loss.",
-      repeat_confirm: repeatConfirm,
+      immediate_threats: immediateThreats,
+      ventilation_oxygenation: ventilationOxygenation,
+      circulation_lactate: circulationLactate,
+      fluids_strong_ion: fluidsStrongIon,
+      stewart_actions: stewartActions,
+      electrolytes,
+      renal_toxin_dka: renalToxinDka,
+      bicarbonate,
+      repeat_confirm: [],
       immediate_safety_actions: safetyActions,
       corrective_measures: correctiveMeasures,
       escalation_triggers: escalationTriggers,
@@ -1041,7 +1150,7 @@
     const abe = alacticBaseExcess(v);
     const oxy = oxygenation(v, settings);
     const causes = likelyCauses(v, primary, metabolic, stewart, abe, raw.flags || {});
-    const treatment = treatmentSuggestions(v, primary, metabolic, compensationResult, oxy, raw.flags || {}, validation);
+    const treatment = treatmentSuggestions(v, primary, metabolic, compensationResult, stewart, abe, oxy, raw.flags || {}, validation);
     const finalDiagnosis = lineItems(v, primary, metabolic, compensationResult, stewart, abe, oxy);
     const stepwise = stepwiseInterpretation(v, primary, metabolic, compensationResult, stewart, abe, oxy, causes, settings);
 
@@ -1102,6 +1211,8 @@
         Cl: has(stewart.Cl) ? round(stewart.Cl, 2) : "",
         pH: has(stewart.pH) ? round(stewart.pH, 3) : "",
         SBE: has(stewart.SBE) ? round(stewart.SBE, 2) : "",
+        albumin_raw_value: has(stewart.albumin_raw_value) ? round(stewart.albumin_raw_value, 2) : "",
+        albumin_raw_unit: stewart.albumin_raw_unit,
         albumin_g_per_L: has(stewart.albumin_g_per_L) ? round(stewart.albumin_g_per_L, 2) : "",
         lactate_mmol_per_L: has(stewart.lactate_mmol_per_L) ? round(stewart.lactate_mmol_per_L, 2) : "",
         Na_minus_Cl: has(stewart.Na_minus_Cl) ? round(stewart.Na_minus_Cl, 2) : "",
@@ -1120,6 +1231,11 @@
         ABE_interpretation: stewart.ABE_interpretation,
         stewart_light_tags: stewart.stewart_light_tags,
         final_stewart_summary: stewart.final_stewart_summary,
+        acidifying_drivers: stewart.acidifying_drivers,
+        alkalinising_drivers: stewart.alkalinising_drivers,
+        clinical_inference: stewart.clinical_inference,
+        suggested_actions: stewart.suggested_actions,
+        quality_flags: stewart.quality_flags,
         missing_inputs: stewart.missing_inputs,
         unit_warnings: stewart.unit_warnings,
         interpretation: stewart.interpretation

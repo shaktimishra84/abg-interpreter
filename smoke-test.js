@@ -31,11 +31,37 @@ assert.strictEqual(report.metabolic_analysis.corrected_anion_gap, 20);
 assert.strictEqual(report.alactic_base_excess.ABE, -9);
 assert.strictEqual(report.stewart_light.residual_UI_after_lactate, -2.6);
 assert.strictEqual(report.stewart_light.ABE, -9);
+assert.strictEqual(report.stewart_light.albumin_raw_value, 2.4);
+assert.strictEqual(report.stewart_light.albumin_raw_unit, "g/dL");
+assert.strictEqual(report.stewart_light.albumin_g_per_L, 24);
+assert.strictEqual(report.stewart_light.SBE_albumin, 4.8);
 assert(report.stewart_light.stewart_light_tags.includes("strong ion acidosis"));
+assert(report.stewart_light.final_stewart_summary.includes("Opposing metabolic processes"));
+assert(report.stewart_light.acidifying_drivers.some((line) => line.includes("Strong ion effect")));
+assert(report.stewart_light.alkalinising_drivers.some((line) => line.includes("Low-albumin effect")));
+assert(report.stewart_light.clinical_inference.some((line) => line.includes("lactate does not fully explain")));
+assert(report.stewart_light.suggested_actions.some((line) => line.includes("non-lactate fixed-acid burden")));
 assert(report.final_diagnosis.some((line) => line.includes("additional respiratory acidosis")));
-assert(report.treatment_suggestions.immediate_safety_actions.some((line) => line.includes("shock/sepsis")));
-assert(report.treatment_suggestions.corrective_measures.some((line) => line.includes("High-anion-gap acidosis")));
+assert(report.treatment_suggestions.opening_summary.includes("mixed metabolic acidosis"));
+assert(report.treatment_suggestions.ventilation_oxygenation.some((line) => line.includes("ventilatory failure")));
+assert(report.treatment_suggestions.circulation_lactate.some((line) => line.includes("repeat lactate")));
+assert(report.treatment_suggestions.fluids_strong_ion.some((line) => line.includes("balanced crystalloid")));
+assert(report.treatment_suggestions.stewart_actions.some((line) => line.includes("non-lactate fixed-acid burden")));
 assert(report.treatment_suggestions.escalation_triggers.some((line) => line.includes("Lactate")));
+
+const treatmentText = JSON.stringify(report.treatment_suggestions).toLowerCase();
+[
+  "calculate anion gap",
+  "check winter formula",
+  "check winter compensation",
+  "check compensation",
+  "measure lactate",
+  "correct anion gap for albumin",
+  "look for high anion gap",
+  "classify the acid-base disorder"
+].forEach((phrase) => {
+  assert(!treatmentText.includes(phrase), `Treatment output repeated diagnostic phrase: ${phrase}`);
+});
 
 const guessedAlbumin = global.ABGEngine.analyze({
   ...mixedCase,
@@ -44,6 +70,13 @@ const guessedAlbumin = global.ABGEngine.analyze({
 assert.strictEqual(guessedAlbumin.metabolic_analysis.corrected_anion_gap, "");
 assert(guessedAlbumin.unit_normalization.blocked_calculations.some((line) => line.includes("Corrected anion gap blocked")));
 assert(guessedAlbumin.unit_normalization.blocked_calculations.some((line) => line.includes("Stewart light not calculated")));
+
+const albuminThree = global.ABGEngine.analyze({
+  ...mixedCase,
+  albumin: { value: "3.0", unit: "g/dL" }
+}, settings);
+assert.strictEqual(albuminThree.stewart_light.albumin_g_per_L, 30);
+assert.strictEqual(albuminThree.stewart_light.SBE_albumin, 3);
 
 const venousCase = global.ABGEngine.analyze({
   ...mixedCase,
